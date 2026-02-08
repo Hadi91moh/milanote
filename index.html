@@ -9,7 +9,6 @@
   <meta name="theme-color" content="#111111" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
-
 <body>
   <div class="appShell">
     <aside class="sidebar">
@@ -27,7 +26,7 @@
         <button class="toolBtn" data-tool="link" title="Create link">
           <span class="toolIcon">🔗</span><span class="toolLabel">Link</span>
         </button>
-        <button class="toolBtn" data-tool="move" title="Move tiles">
+        <button class="toolBtn" data-tool="move" title="Move / swap tiles">
           <span class="toolIcon">↔️</span><span class="toolLabel">Move</span>
         </button>
       </div>
@@ -65,7 +64,7 @@
     </main>
   </div>
 
-  <!-- Editor modal -->
+  <!-- Editor modal (whiteboard-like) -->
   <div class="modalOverlay hidden" id="modalOverlay" role="dialog" aria-modal="true">
     <div class="modal">
       <div class="modalHeader">
