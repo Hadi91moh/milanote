@@ -16,23 +16,25 @@
         <button class="iconBtn" id="btnMenu" title="Menu">☰</button>
       </div>
 
+      <!-- Action buttons: click once => create in next free slot -->
       <div class="sbGroup">
-        <button class="toolBtn active" data-tool="board" title="Create board">
+        <button class="toolBtn action" id="actionBoard" title="Create board">
           <span class="toolIcon">▦</span><span class="toolLabel">Board</span>
         </button>
-        <button class="toolBtn" data-tool="note" title="Create note">
+        <button class="toolBtn action" id="actionNote" title="Create note">
           <span class="toolIcon">📝</span><span class="toolLabel">Note</span>
         </button>
-        <button class="toolBtn" data-tool="link" title="Create link">
+        <button class="toolBtn action" id="actionLink" title="Create link">
           <span class="toolIcon">🔗</span><span class="toolLabel">Link</span>
-        </button>
-        <button class="toolBtn" data-tool="move" title="Move / swap tiles">
-          <span class="toolIcon">↔️</span><span class="toolLabel">Move</span>
         </button>
       </div>
 
+      <!-- Modes: toggle on/off -->
       <div class="sbGroup">
-        <button class="toolBtn danger" data-tool="trash" title="Delete mode">
+        <button class="toolBtn mode" id="modeMove" title="Move / swap tiles">
+          <span class="toolIcon">↔️</span><span class="toolLabel">Move</span>
+        </button>
+        <button class="toolBtn danger mode" id="modeTrash" title="Delete tiles">
           <span class="toolIcon">🗑️</span><span class="toolLabel">Trash</span>
         </button>
       </div>
@@ -52,7 +54,7 @@
 
         <div class="topActions">
           <button class="ghostBtn" id="btnGridMinus" title="Decrease grid">−</button>
-          <div class="gridInfo" id="gridInfo">Grid</div>
+          <div class="gridInfo" id="gridInfo">Slots</div>
           <button class="ghostBtn" id="btnGridPlus" title="Increase grid">+</button>
           <button class="ghostBtn" id="btnRename">Rename</button>
         </div>
@@ -64,18 +66,18 @@
     </main>
   </div>
 
-  <!-- Editor modal (whiteboard-like) -->
+  <!-- Editor modal -->
   <div class="modalOverlay hidden" id="modalOverlay" role="dialog" aria-modal="true">
     <div class="modal">
       <div class="modalHeader">
-        <div class="modalTitle" id="modalTitle">New</div>
+        <div class="modalTitle" id="modalTitle">Editor</div>
         <button class="iconBtn" id="modalClose" title="Close">✕</button>
       </div>
 
       <div class="modalBody">
         <label class="field">
           <div class="fieldLabel">Title (optional)</div>
-          <input id="modalInputTitle" class="fieldInput" placeholder="e.g. Ideas, Article, Reminder">
+          <input id="modalInputTitle" class="fieldInput" placeholder="e.g. Ideas, Reminder">
         </label>
 
         <label class="field">
