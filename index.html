@@ -11,22 +11,91 @@
 </head>
 
 <body>
-  <header class="top">
-    <a class="brand" href="#/">Boards</a>
+  <div class="appShell">
+    <aside class="sidebar">
+      <div class="sbTop">
+        <button class="iconBtn" id="btnMenu" title="Menu">☰</button>
+      </div>
 
-    <button id="exportBtn" type="button">Export</button>
+      <div class="sbGroup">
+        <button class="toolBtn active" data-tool="board" title="Create board">
+          <span class="toolIcon">▦</span><span class="toolLabel">Board</span>
+        </button>
+        <button class="toolBtn" data-tool="note" title="Create note">
+          <span class="toolIcon">📝</span><span class="toolLabel">Note</span>
+        </button>
+        <button class="toolBtn" data-tool="link" title="Create link">
+          <span class="toolIcon">🔗</span><span class="toolLabel">Link</span>
+        </button>
+        <button class="toolBtn" data-tool="move" title="Move tiles">
+          <span class="toolIcon">↔️</span><span class="toolLabel">Move</span>
+        </button>
+      </div>
 
-    <label class="btnLike">
-      Import
-      <input id="importInput" type="file" accept="application/json" hidden />
-    </label>
-  </header>
+      <div class="sbGroup">
+        <button class="toolBtn danger" data-tool="trash" title="Delete mode">
+          <span class="toolIcon">🗑️</span><span class="toolLabel">Trash</span>
+        </button>
+      </div>
 
-  <main id="app"></main>
+      <div class="sbBottom">
+        <button class="smallBtn" id="exportBtn">Export</button>
+        <label class="smallBtn fileBtn">
+          Import
+          <input id="importInput" type="file" accept="application/json" hidden />
+        </label>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumbs" id="crumbs"></div>
+
+        <div class="topActions">
+          <button class="ghostBtn" id="btnGridMinus" title="Decrease grid">−</button>
+          <div class="gridInfo" id="gridInfo">Grid</div>
+          <button class="ghostBtn" id="btnGridPlus" title="Increase grid">+</button>
+          <button class="ghostBtn" id="btnRename">Rename</button>
+        </div>
+      </header>
+
+      <section class="canvas">
+        <div class="grid" id="grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Editor modal -->
+  <div class="modalOverlay hidden" id="modalOverlay" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="modalTitle" id="modalTitle">New</div>
+        <button class="iconBtn" id="modalClose" title="Close">✕</button>
+      </div>
+
+      <div class="modalBody">
+        <label class="field">
+          <div class="fieldLabel">Title (optional)</div>
+          <input id="modalInputTitle" class="fieldInput" placeholder="e.g. Ideas, Article, Reminder">
+        </label>
+
+        <label class="field">
+          <div class="fieldLabel" id="modalContentLabel">Content</div>
+          <textarea id="modalInputContent" class="fieldTextarea" rows="10" placeholder=""></textarea>
+        </label>
+
+        <div class="hint" id="modalHint"></div>
+      </div>
+
+      <div class="modalFooter">
+        <button class="ghostBtn" id="modalCancel">Cancel</button>
+        <button class="primaryBtn" id="modalSave">Save</button>
+      </div>
+    </div>
+  </div>
 
   <script src="./app.js"></script>
   <script>
-    // Service workers need a secure context (HTTPS), except localhost for dev. :contentReference[oaicite:5]{index=5}
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js");
     }
