@@ -75,9 +75,19 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   padding:0 16px;
   gap:12px;
 }
-.crumbs{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crumbs{
+  font-size:14px;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
 .crumbs a{color:#0a58ca;text-decoration:none}
+
 .topActions{display:flex;gap:10px;align-items:center}
+
+.gridInfo{
+  font-size:12px;color:var(--muted);
+  border:1px solid var(--border);
+  padding:10px 12px;border-radius:12px;background:#fff;
+}
 
 .ghostBtn{
   border:1px solid var(--border);
@@ -85,11 +95,6 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   border-radius:12px;
   padding:10px 12px;
   cursor:pointer;
-}
-.gridInfo{
-  font-size:12px;color:var(--muted);
-  border:1px solid var(--border);
-  padding:10px 12px;border-radius:12px;background:#fff;
 }
 
 .canvas{
@@ -106,7 +111,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   align-content:start;
 }
 
-/* Slot & cards */
+/* Slot cards */
 .slot{
   width:var(--slot);
   min-height:var(--slot);
@@ -121,7 +126,6 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   position:relative;
   cursor:pointer;
 }
-
 .card{
   width:var(--slot);
   min-height:var(--slot);
@@ -140,11 +144,15 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 .cardTitle{font-weight:700; font-size:14px; line-height:1.2}
 .cardBody{font-size:12px;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
 .cardHint{font-size:12px;color:var(--muted);margin-top:auto}
-
 .trashPulse{outline:2px solid #ff000035}
 
-.slot.selected, .card.selected{outline: 3px solid #11111125;}
-.slot.moveTarget{outline: 3px dashed #11111135; background:#ffffffaa;}
+.slot.selected, .card.selected{
+  outline: 3px solid #11111125;
+}
+.slot.moveTarget{
+  outline: 3px dashed #11111135;
+  background: #ffffffaa;
+}
 
 /* Modal */
 .modalOverlay{
