@@ -1,13 +1,13 @@
-// Data model:
+// Storage model:
 // state = {
 //   boards: { [id]: { id, parentId, title, slots: Array(null | {type:'board'|'item', id}) } },
-//   items:  { [id]: { id, boardId, kind:'note'|'link', title, content } }
+//   items:  { [id]: { id, boardId, kind:'note'|'link', title, content, w, h } }
 // }
 //
-// Fixed positions are the slot indices.
-// Empty slots are invisible unless Move mode is ON.
+// Slots are fixed positions (index-based).
+// Rendering uses explicit grid placement so spans are possible.
 
-const STORAGE_KEY = "boards_state_v4";
+const STORAGE_KEY = "boards_state_v4"; // keep same to preserve your existing data
 
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
@@ -33,6 +33,7 @@ const actionNote = document.getElementById("actionNote");
 const actionLink = document.getElementById("actionLink");
 
 const modeMoveBtn = document.getElementById("modeMove");
+const modeSizeBtn = document.getElementById("modeSize");
 const modeTrashBtn = document.getElementById("modeTrash");
 
 const btnGridPlus = document.getElementById("btnGridPlus");
@@ -42,8 +43,9 @@ const btnRename = document.getElementById("btnRename");
 const exportBtn = document.getElementById("exportBtn");
 const importInput = document.getElementById("importInput");
 
-let mode = "none";  // none | move | trash
-let movePick = null; // { boardId, slotIndex } or null
+let mode = "none";        // none | move | size | trash
+let movePick = null;      // { slotIndex } or null
+let sizePick = null;      // { anchorIndex, itemId, destIndex } or null
 
 function uid() {
   return (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
@@ -53,28 +55,30 @@ function safeParseJSON(raw) { try { return JSON.parse(raw); } catch { return nul
 
 function initBoard(title, parentId) {
   const id = uid();
-  return {
-    id,
-    parentId: parentId ?? null,
-    title: title || "Untitled",
-    slots: Array(DEFAULT_SLOTS).fill(null),
-  };
+  return { id, parentId: parentId ?? null, title: title || "Untitled", slots: Array(DEFAULT_SLOTS).fill(null) };
 }
 
 function migrateIfNeeded(state) {
-  // Old or empty -> create new root
   if (!state || !state.boards || !state.items) {
     const root = initBoard("My Board", null);
     return { boards: { [root.id]: root }, items: {} };
   }
 
-  // Ensure slots exist and have at least DEFAULT_SLOTS
   for (const b of Object.values(state.boards)) {
     if (!Array.isArray(b.slots)) b.slots = Array(DEFAULT_SLOTS).fill(null);
     if (b.slots.length < DEFAULT_SLOTS) {
       b.slots = b.slots.concat(Array(DEFAULT_SLOTS - b.slots.length).fill(null));
     }
   }
+
+  // add default sizes for old items
+  for (const it of Object.values(state.items)) {
+    if (typeof it.w !== "number") it.w = 1;
+    if (typeof it.h !== "number") it.h = 1;
+    if (it.w < 1) it.w = 1;
+    if (it.h < 1) it.h = 1;
+  }
+
   return state;
 }
 
@@ -93,7 +97,6 @@ function saveState(state) {
 function getCurrentBoardId(state) {
   const hash = location.hash || "#/";
   if (hash.startsWith("#/b/")) return hash.slice("#/b/".length);
-
   const root = Object.values(state.boards).find(b => b.parentId === null);
   return root?.id;
 }
@@ -125,14 +128,76 @@ function firstEmptySlot(board) {
   return board.slots.findIndex(x => x === null);
 }
 
+function getCols() {
+  const tpl = getComputedStyle(elGrid).gridTemplateColumns;
+  const cols = tpl.split(" ").filter(x => x.trim().length > 0).length;
+  return Math.max(1, cols || 1);
+}
+
+function indexToRowCol(index, cols) {
+  const row = Math.floor(index / cols) + 1;
+  const col = (index % cols) + 1;
+  return { row, col };
+}
+
+function rectCellsFromAnchor(anchorIndex, w, h, cols, maxSlots) {
+  const { row: r0, col: c0 } = indexToRowCol(anchorIndex, cols);
+  const cells = [];
+
+  // prevent wrap
+  if (c0 + w - 1 > cols) return [];
+
+  for (let dr = 0; dr < h; dr++) {
+    for (let dc = 0; dc < w; dc++) {
+      const r = r0 + dr;
+      const c = c0 + dc;
+      const idx = (r - 1) * cols + (c - 1);
+      if (idx < 0 || idx >= maxSlots) return [];
+      cells.push(idx);
+    }
+  }
+  return cells;
+}
+
+function getSpanForRef(ref, state) {
+  if (!ref) return { w: 1, h: 1 };
+  if (ref.type === "board") return { w: 1, h: 1 };
+  if (ref.type === "item") {
+    const it = state.items[ref.id];
+    return { w: Math.max(1, it?.w || 1), h: Math.max(1, it?.h || 1) };
+  }
+  return { w: 1, h: 1 };
+}
+
+function buildOccupancy(board, state, cols) {
+  // Map cellIndex -> anchorIndex
+  const occ = new Map();
+  for (let i = 0; i < board.slots.length; i++) {
+    const ref = board.slots[i];
+    if (!ref) continue;
+
+    const { w, h } = getSpanForRef(ref, state);
+    const cells = rectCellsFromAnchor(i, w, h, cols, board.slots.length);
+    for (const cell of cells) {
+      // first wins (avoid changing behavior if overlaps exist due to old state)
+      if (!occ.has(cell)) occ.set(cell, i);
+    }
+  }
+  return occ;
+}
+
 function ensureGridSize(board, newSize) {
   const target = Math.max(GRID_MIN, Math.min(GRID_MAX, newSize));
+  const cols = getCols();
 
   if (target < board.slots.length) {
-    const tail = board.slots.slice(target);
-    if (tail.some(x => x !== null)) {
-      alert("Cannot shrink: there are tiles in the slots that would be removed. Move them first.");
-      return false;
+    // cannot shrink if any occupied cell would be cut off
+    const occ = buildOccupancy(board, loadState(), cols);
+    for (const cell of occ.keys()) {
+      if (cell >= target) {
+        alert("Cannot shrink: there are tiles in the slots that would be removed. Move/resize them first.");
+        return false;
+      }
     }
     board.slots = board.slots.slice(0, target);
     return true;
@@ -158,7 +223,6 @@ function deleteBoardRecursive(state, boardId) {
 
   delete state.boards[boardId];
 
-  // Remove references from any remaining boards
   for (const b of Object.values(state.boards)) {
     b.slots = b.slots.map(ref => (ref && ref.type === "board" && ref.id === boardId) ? null : ref);
   }
@@ -219,357 +283,20 @@ function openModal({ kind, modeLabel, initialTitle, initialContent, onSave }) {
 function setMode(next) {
   mode = next;
   movePick = null;
+  sizePick = null;
 
   modeMoveBtn.classList.toggle("on", mode === "move");
+  modeSizeBtn.classList.toggle("on", mode === "size");
   modeTrashBtn.classList.toggle("on", mode === "trash");
 
   render();
 }
 
+// Mode toggles
 modeMoveBtn.onclick = () => setMode(mode === "move" ? "none" : "move");
+modeSizeBtn.onclick = () => setMode(mode === "size" ? "none" : "size");
 modeTrashBtn.onclick = () => setMode(mode === "trash" ? "none" : "trash");
 
-// ACTIONS (Board/Note/Link create in next available slot)
+// Actions (create in next free slot)
 actionBoard.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  setMode("none");
-
-  const idx = firstEmptySlot(board);
-  if (idx < 0) {
-    alert("No empty slots. Increase the grid size (+).");
-    return;
-  }
-
-  const newBoard = initBoard("New Board", boardId);
-  state.boards[newBoard.id] = newBoard;
-  board.slots[idx] = { type: "board", id: newBoard.id };
-
-  saveState(state);
-  render();
-};
-
-actionNote.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  setMode("none");
-
-  const idx = firstEmptySlot(board);
-  if (idx < 0) {
-    alert("No empty slots. Increase the grid size (+).");
-    return;
-  }
-
-  openModal({
-    kind: "note",
-    modeLabel: "new",
-    initialTitle: "",
-    initialContent: "",
-    onSave: ({ title, content }) => {
-      const itemId = uid();
-      state.items[itemId] = { id: itemId, boardId, kind: "note", title, content };
-      board.slots[idx] = { type: "item", id: itemId };
-      saveState(state);
-      render();
-    }
-  });
-};
-
-actionLink.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  setMode("none");
-
-  const idx = firstEmptySlot(board);
-  if (idx < 0) {
-    alert("No empty slots. Increase the grid size (+).");
-    return;
-  }
-
-  openModal({
-    kind: "link",
-    modeLabel: "new",
-    initialTitle: "",
-    initialContent: "",
-    onSave: ({ title, content }) => {
-      const itemId = uid();
-      state.items[itemId] = { id: itemId, boardId, kind: "link", title, content };
-      board.slots[idx] = { type: "item", id: itemId };
-      saveState(state);
-      render();
-    }
-  });
-};
-
-// Rename current board
-btnRename.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  openModal({
-    kind: "board",
-    modeLabel: "edit",
-    initialTitle: "",
-    initialContent: board.title,
-    onSave: ({ content }) => {
-      board.title = content.trim() || board.title;
-      saveState(state);
-      render();
-    }
-  });
-};
-
-// Grid controls
-btnGridPlus.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  if (ensureGridSize(board, board.slots.length + GRID_STEP)) {
-    saveState(state);
-    render();
-  }
-};
-
-btnGridMinus.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  if (ensureGridSize(board, board.slots.length - GRID_STEP)) {
-    saveState(state);
-    render();
-  }
-};
-
-function render() {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-
-  if (!board) {
-    const root = Object.values(state.boards).find(b => b.parentId === null);
-    if (root) setCurrentBoard(root.id);
-    return;
-  }
-
-  elGridInfo.textContent = `Slots: ${board.slots.length}`;
-
-  const crumbs = breadcrumb(state, boardId);
-  elCrumbs.innerHTML = crumbs.map((b, i) => {
-    if (i === crumbs.length - 1) return `<span>${escapeHtml(b.title)}</span>`;
-    return `<a href="#/b/${b.id}">${escapeHtml(b.title)}</a> <span>/</span> `;
-  }).join("");
-
-  elGrid.innerHTML = "";
-
-  board.slots.forEach((ref, index) => {
-    if (!ref) {
-      // Empty slot is invisible unless move mode is ON
-      const slot = document.createElement("div");
-      slot.className = "slot";
-
-      if (mode === "move") {
-        slot.classList.add("moveTarget");
-        slot.onclick = () => onClickSlot(state, boardId, index);
-      } else {
-        slot.onclick = null;
-      }
-
-      if (mode === "move" && movePick && movePick.slotIndex === index) {
-        slot.classList.add("selected");
-      }
-
-      elGrid.appendChild(slot);
-      return;
-    }
-
-    const card = document.createElement("div");
-    card.className = "card";
-
-    if (mode === "trash") card.classList.add("trashPulse");
-    if (mode === "move" && movePick && movePick.slotIndex === index) card.classList.add("selected");
-
-    if (ref.type === "board") {
-      const b = state.boards[ref.id];
-      card.innerHTML = `
-        <div class="cardHeader">
-          <div class="badge">BOARD</div>
-          <div class="badge">▦</div>
-        </div>
-        <div class="cardTitle">${escapeHtml(b?.title || "(missing board)")}</div>
-        <div class="cardBody">${mode === "trash" ? "Click to delete" : (mode === "move" ? "Pick / drop" : "Click to open")}</div>
-        <div class="cardHint">${mode === "move" ? "Move mode: select then choose destination" : ""}</div>
-      `;
-      card.onclick = () => onClickSlot(state, boardId, index);
-      elGrid.appendChild(card);
-      return;
-    }
-
-    if (ref.type === "item") {
-      const it = state.items[ref.id];
-      const kind = it?.kind || "note";
-      const icon = kind === "link" ? "🔗" : "📝";
-
-      const body = kind === "link"
-        ? `<a target="_blank" href="${escapeHtml(it?.content || "")}" onclick="event.stopPropagation()">${escapeHtml(it?.content || "")}</a>`
-        : `<div style="white-space:pre-wrap">${escapeHtml(it?.content || "")}</div>`;
-
-      card.innerHTML = `
-        <div class="cardHeader">
-          <div class="badge">${escapeHtml(kind.toUpperCase())}</div>
-          <div class="badge">${icon}</div>
-        </div>
-        <div class="cardTitle">${escapeHtml(it?.title || "(no title)")}</div>
-        <div class="cardBody">${body}</div>
-        <div class="cardHint">${
-          mode === "trash" ? "Click to delete" :
-          mode === "move"  ? "Pick / drop" :
-          "Click to edit"
-        }</div>
-      `;
-
-      card.onclick = () => onClickSlot(state, boardId, index);
-      elGrid.appendChild(card);
-      return;
-    }
-  });
-}
-
-function onClickSlot(state, boardId, slotIndex) {
-  const board = state.boards[boardId];
-  const ref = board.slots[slotIndex];
-
-  // TRASH MODE: delete only if tile exists
-  if (mode === "trash") {
-    if (!ref) return;
-
-    if (ref.type === "item") {
-      const it = state.items[ref.id];
-      if (!confirm(`Delete this ${it?.kind || "item"}?`)) return;
-      delete state.items[ref.id];
-      board.slots[slotIndex] = null;
-      saveState(state);
-      render();
-      return;
-    }
-
-    if (ref.type === "board") {
-      const b = state.boards[ref.id];
-      if (!confirm(`Delete board "${b?.title || ""}" and everything inside it?`)) return;
-      deleteBoardRecursive(state, ref.id);
-      board.slots[slotIndex] = null;
-      saveState(state);
-      render();
-      return;
-    }
-  }
-
-  // MOVE MODE: pick source tile, then choose destination slot (empty or swap)
-  if (mode === "move") {
-    if (!movePick) {
-      if (!ref) return; // must pick a tile
-      movePick = { boardId, slotIndex };
-      render();
-      return;
-    }
-
-    // drop
-    const src = movePick.slotIndex;
-    const dst = slotIndex;
-
-    if (src === dst) {
-      movePick = null;
-      render();
-      return;
-    }
-
-    const tmp = board.slots[dst];
-    board.slots[dst] = board.slots[src];
-    board.slots[src] = tmp;
-
-    movePick = null;
-    saveState(state);
-    render();
-    return;
-  }
-
-  // NORMAL MODE: clicking tiles does open/edit
-  if (!ref) return;
-
-  if (ref.type === "board") {
-    setCurrentBoard(ref.id); // ✅ nested boards
-    return;
-  }
-
-  if (ref.type === "item") {
-    const it = state.items[ref.id];
-    if (!it) return;
-
-    openModal({
-      kind: it.kind,
-      modeLabel: "edit",
-      initialTitle: it.title || "",
-      initialContent: it.content || "",
-      onSave: ({ title, content }) => {
-        it.title = title;
-        it.content = content;
-        saveState(state);
-        render();
-      }
-    });
-    return;
-  }
-}
-
-// Export / Import
-exportBtn.onclick = () => {
-  const data = localStorage.getItem(STORAGE_KEY) || "{}";
-  const blob = new Blob([data], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "boards-backup.json";
-  a.click();
-  URL.revokeObjectURL(url);
-};
-
-importInput.addEventListener("change", async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-
-  try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    const migrated = migrateIfNeeded(parsed);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-    location.hash = "#/";
-    setMode("none");
-    render();
-  } catch {
-    alert("Import failed: invalid JSON.");
-  } finally {
-    e.target.value = "";
-  }
-});
-
-// Routing
-window.addEventListener("hashchange", () => {
-  movePick = null;
-  render();
-});
-
-render();
+  const state = loa
