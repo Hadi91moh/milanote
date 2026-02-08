@@ -1,4 +1,14 @@
-const STORAGE_KEY = "boards_state_v3";
+// Data model:
+// state = {
+//   boards: { [id]: { id, parentId, title, slots: Array(null | {type:'board'|'item', id}) } },
+//   items:  { [id]: { id, boardId, kind:'note'|'link', title, content } }
+// }
+//
+// Fixed positions are the slot indices.
+// Empty slots are invisible unless Move mode is ON.
+
+const STORAGE_KEY = "boards_state_v4";
+
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
 const GRID_MIN = 20;
@@ -18,8 +28,22 @@ const modalSave = document.getElementById("modalSave");
 const modalCancel = document.getElementById("modalCancel");
 const modalClose = document.getElementById("modalClose");
 
-let currentTool = "board";    // board | note | link | move | trash
-let movePick = null;          // { boardId, slotIndex } when selected
+const actionBoard = document.getElementById("actionBoard");
+const actionNote = document.getElementById("actionNote");
+const actionLink = document.getElementById("actionLink");
+
+const modeMoveBtn = document.getElementById("modeMove");
+const modeTrashBtn = document.getElementById("modeTrash");
+
+const btnGridPlus = document.getElementById("btnGridPlus");
+const btnGridMinus = document.getElementById("btnGridMinus");
+const btnRename = document.getElementById("btnRename");
+
+const exportBtn = document.getElementById("exportBtn");
+const importInput = document.getElementById("importInput");
+
+let mode = "none";  // none | move | trash
+let movePick = null; // { boardId, slotIndex } or null
 
 function uid() {
   return (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
@@ -29,14 +53,22 @@ function safeParseJSON(raw) { try { return JSON.parse(raw); } catch { return nul
 
 function initBoard(title, parentId) {
   const id = uid();
-  return { id, parentId: parentId ?? null, title: title || "Untitled", slots: Array(DEFAULT_SLOTS).fill(null) };
+  return {
+    id,
+    parentId: parentId ?? null,
+    title: title || "Untitled",
+    slots: Array(DEFAULT_SLOTS).fill(null),
+  };
 }
 
 function migrateIfNeeded(state) {
+  // Old or empty -> create new root
   if (!state || !state.boards || !state.items) {
     const root = initBoard("My Board", null);
     return { boards: { [root.id]: root }, items: {} };
   }
+
+  // Ensure slots exist and have at least DEFAULT_SLOTS
   for (const b of Object.values(state.boards)) {
     if (!Array.isArray(b.slots)) b.slots = Array(DEFAULT_SLOTS).fill(null);
     if (b.slots.length < DEFAULT_SLOTS) {
@@ -61,6 +93,7 @@ function saveState(state) {
 function getCurrentBoardId(state) {
   const hash = location.hash || "#/";
   if (hash.startsWith("#/b/")) return hash.slice("#/b/".length);
+
   const root = Object.values(state.boards).find(b => b.parentId === null);
   return root?.id;
 }
@@ -125,36 +158,34 @@ function deleteBoardRecursive(state, boardId) {
 
   delete state.boards[boardId];
 
-  // remove references from any parent slots
+  // Remove references from any remaining boards
   for (const b of Object.values(state.boards)) {
     b.slots = b.slots.map(ref => (ref && ref.type === "board" && ref.id === boardId) ? null : ref);
   }
 }
 
-function openModal({ kind, mode, initialTitle, initialContent, onSave }) {
+function openModal({ kind, modeLabel, initialTitle, initialContent, onSave }) {
   overlay.classList.remove("hidden");
   modalInputTitle.value = initialTitle || "";
   modalInputContent.value = initialContent || "";
 
-  const isEdit = mode === "edit";
-
   if (kind === "note") {
-    modalTitle.textContent = isEdit ? "Edit Note" : "New Note";
+    modalTitle.textContent = modeLabel === "edit" ? "Edit Note" : "New Note";
     modalContentLabel.textContent = "Note";
     modalInputContent.placeholder = "Write your note…";
-    modalHint.textContent = "Save updates the note in this board.";
+    modalHint.textContent = "";
   } else if (kind === "link") {
-    modalTitle.textContent = isEdit ? "Edit Link" : "New Link";
+    modalTitle.textContent = modeLabel === "edit" ? "Edit Link" : "New Link";
     modalContentLabel.textContent = "URL";
     modalInputContent.placeholder = "https://example.com";
     modalHint.textContent = "If you omit https://, it will be added automatically.";
   } else if (kind === "board") {
-    modalTitle.textContent = isEdit ? "Rename Board" : "New Board";
+    modalTitle.textContent = "Rename Board";
     modalContentLabel.textContent = "Name";
     modalInputContent.placeholder = "Board name";
-    modalHint.textContent = "Save updates the board name.";
+    modalHint.textContent = "";
   } else {
-    modalTitle.textContent = isEdit ? "Edit" : "New";
+    modalTitle.textContent = "Editor";
     modalContentLabel.textContent = "Content";
     modalHint.textContent = "";
   }
@@ -185,23 +216,102 @@ function openModal({ kind, mode, initialTitle, initialContent, onSave }) {
   document.onkeydown = (e) => { if (e.key === "Escape") close(); };
 }
 
-function setTool(tool) {
-  currentTool = tool;
-  movePick = null; // cancel any move selection when switching tools
+function setMode(next) {
+  mode = next;
+  movePick = null;
 
-  document.querySelectorAll(".toolBtn").forEach(btn => {
-    btn.classList.toggle("active", btn.getAttribute("data-tool") === tool);
-  });
+  modeMoveBtn.classList.toggle("on", mode === "move");
+  modeTrashBtn.classList.toggle("on", mode === "trash");
 
   render();
 }
 
-document.querySelectorAll(".toolBtn").forEach(btn => {
-  btn.addEventListener("click", () => setTool(btn.getAttribute("data-tool")));
-});
+modeMoveBtn.onclick = () => setMode(mode === "move" ? "none" : "move");
+modeTrashBtn.onclick = () => setMode(mode === "trash" ? "none" : "trash");
+
+// ACTIONS (Board/Note/Link create in next available slot)
+actionBoard.onclick = () => {
+  const state = loadState();
+  const boardId = getCurrentBoardId(state);
+  const board = state.boards[boardId];
+  if (!board) return;
+
+  setMode("none");
+
+  const idx = firstEmptySlot(board);
+  if (idx < 0) {
+    alert("No empty slots. Increase the grid size (+).");
+    return;
+  }
+
+  const newBoard = initBoard("New Board", boardId);
+  state.boards[newBoard.id] = newBoard;
+  board.slots[idx] = { type: "board", id: newBoard.id };
+
+  saveState(state);
+  render();
+};
+
+actionNote.onclick = () => {
+  const state = loadState();
+  const boardId = getCurrentBoardId(state);
+  const board = state.boards[boardId];
+  if (!board) return;
+
+  setMode("none");
+
+  const idx = firstEmptySlot(board);
+  if (idx < 0) {
+    alert("No empty slots. Increase the grid size (+).");
+    return;
+  }
+
+  openModal({
+    kind: "note",
+    modeLabel: "new",
+    initialTitle: "",
+    initialContent: "",
+    onSave: ({ title, content }) => {
+      const itemId = uid();
+      state.items[itemId] = { id: itemId, boardId, kind: "note", title, content };
+      board.slots[idx] = { type: "item", id: itemId };
+      saveState(state);
+      render();
+    }
+  });
+};
+
+actionLink.onclick = () => {
+  const state = loadState();
+  const boardId = getCurrentBoardId(state);
+  const board = state.boards[boardId];
+  if (!board) return;
+
+  setMode("none");
+
+  const idx = firstEmptySlot(board);
+  if (idx < 0) {
+    alert("No empty slots. Increase the grid size (+).");
+    return;
+  }
+
+  openModal({
+    kind: "link",
+    modeLabel: "new",
+    initialTitle: "",
+    initialContent: "",
+    onSave: ({ title, content }) => {
+      const itemId = uid();
+      state.items[itemId] = { id: itemId, boardId, kind: "link", title, content };
+      board.slots[idx] = { type: "item", id: itemId };
+      saveState(state);
+      render();
+    }
+  });
+};
 
 // Rename current board
-document.getElementById("btnRename").onclick = () => {
+btnRename.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
   const board = state.boards[boardId];
@@ -209,7 +319,7 @@ document.getElementById("btnRename").onclick = () => {
 
   openModal({
     kind: "board",
-    mode: "edit",
+    modeLabel: "edit",
     initialTitle: "",
     initialContent: board.title,
     onSave: ({ content }) => {
@@ -220,8 +330,8 @@ document.getElementById("btnRename").onclick = () => {
   });
 };
 
-// Grid size controls
-document.getElementById("btnGridPlus").onclick = () => {
+// Grid controls
+btnGridPlus.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
   const board = state.boards[boardId];
@@ -233,7 +343,7 @@ document.getElementById("btnGridPlus").onclick = () => {
   }
 };
 
-document.getElementById("btnGridMinus").onclick = () => {
+btnGridMinus.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
   const board = state.boards[boardId];
@@ -256,43 +366,42 @@ function render() {
     return;
   }
 
-  // grid info
-  if (elGridInfo) elGridInfo.textContent = `Slots: ${board.slots.length}`;
+  elGridInfo.textContent = `Slots: ${board.slots.length}`;
 
-  // crumbs
   const crumbs = breadcrumb(state, boardId);
   elCrumbs.innerHTML = crumbs.map((b, i) => {
     if (i === crumbs.length - 1) return `<span>${escapeHtml(b.title)}</span>`;
     return `<a href="#/b/${b.id}">${escapeHtml(b.title)}</a> <span>/</span> `;
   }).join("");
 
-  // build grid
   elGrid.innerHTML = "";
 
   board.slots.forEach((ref, index) => {
     if (!ref) {
+      // Empty slot is invisible unless move mode is ON
       const slot = document.createElement("div");
       slot.className = "slot";
-      slot.textContent = `slot ${index + 1}`;
 
-      if (currentTool === "move" && movePick) {
+      if (mode === "move") {
         slot.classList.add("moveTarget");
+        slot.onclick = () => onClickSlot(state, boardId, index);
+      } else {
+        slot.onclick = null;
       }
-      if (currentTool === "move" && movePick && movePick.slotIndex === index) {
+
+      if (mode === "move" && movePick && movePick.slotIndex === index) {
         slot.classList.add("selected");
       }
 
-      slot.onclick = () => onSlotClick(state, boardId, index);
       elGrid.appendChild(slot);
       return;
     }
 
-    // ref exists -> card
     const card = document.createElement("div");
     card.className = "card";
 
-    if (currentTool === "trash") card.classList.add("trashPulse");
-    if (currentTool === "move" && movePick && movePick.slotIndex === index) card.classList.add("selected");
+    if (mode === "trash") card.classList.add("trashPulse");
+    if (mode === "move" && movePick && movePick.slotIndex === index) card.classList.add("selected");
 
     if (ref.type === "board") {
       const b = state.boards[ref.id];
@@ -302,10 +411,10 @@ function render() {
           <div class="badge">▦</div>
         </div>
         <div class="cardTitle">${escapeHtml(b?.title || "(missing board)")}</div>
-        <div class="cardBody">${currentTool === "trash" ? "Click to delete" : (currentTool === "move" ? "Click to pick / drop" : "Click to open")}</div>
-        <div class="cardHint">${currentTool === "move" ? "Move tool: pick then choose destination" : ""}</div>
+        <div class="cardBody">${mode === "trash" ? "Click to delete" : (mode === "move" ? "Pick / drop" : "Click to open")}</div>
+        <div class="cardHint">${mode === "move" ? "Move mode: select then choose destination" : ""}</div>
       `;
-      card.onclick = () => onSlotClick(state, boardId, index);
+      card.onclick = () => onClickSlot(state, boardId, index);
       elGrid.appendChild(card);
       return;
     }
@@ -313,52 +422,44 @@ function render() {
     if (ref.type === "item") {
       const it = state.items[ref.id];
       const kind = it?.kind || "note";
-      const kindLabel = kind.toUpperCase();
       const icon = kind === "link" ? "🔗" : "📝";
 
       const body = kind === "link"
-        ? `<a target="_blank" href="${escapeHtml(it?.content || "")}">${escapeHtml(it?.content || "")}</a>`
+        ? `<a target="_blank" href="${escapeHtml(it?.content || "")}" onclick="event.stopPropagation()">${escapeHtml(it?.content || "")}</a>`
         : `<div style="white-space:pre-wrap">${escapeHtml(it?.content || "")}</div>`;
 
       card.innerHTML = `
         <div class="cardHeader">
-          <div class="badge">${escapeHtml(kindLabel)}</div>
+          <div class="badge">${escapeHtml(kind.toUpperCase())}</div>
           <div class="badge">${icon}</div>
         </div>
         <div class="cardTitle">${escapeHtml(it?.title || "(no title)")}</div>
         <div class="cardBody">${body}</div>
         <div class="cardHint">${
-          currentTool === "trash" ? "Click to delete" :
-          currentTool === "move"  ? "Move tool: pick then choose destination" :
+          mode === "trash" ? "Click to delete" :
+          mode === "move"  ? "Pick / drop" :
           "Click to edit"
         }</div>
       `;
 
-      // allow normal link open only in non-trash/non-move mode
-      card.onclick = (e) => {
-        if (kind === "link" && currentTool === "board") return; // link click works
-        e.preventDefault();
-        onSlotClick(state, boardId, index);
-      };
-
+      card.onclick = () => onClickSlot(state, boardId, index);
       elGrid.appendChild(card);
       return;
     }
   });
 }
 
-function onSlotClick(state, boardId, slotIndex) {
+function onClickSlot(state, boardId, slotIndex) {
   const board = state.boards[boardId];
   const ref = board.slots[slotIndex];
 
-  // ---- TRASH MODE ----
-  if (currentTool === "trash") {
+  // TRASH MODE: delete only if tile exists
+  if (mode === "trash") {
     if (!ref) return;
 
     if (ref.type === "item") {
       const it = state.items[ref.id];
-      const ok = confirm(`Delete this ${it?.kind || "item"}?`);
-      if (!ok) return;
+      if (!confirm(`Delete this ${it?.kind || "item"}?`)) return;
       delete state.items[ref.id];
       board.slots[slotIndex] = null;
       saveState(state);
@@ -368,8 +469,7 @@ function onSlotClick(state, boardId, slotIndex) {
 
     if (ref.type === "board") {
       const b = state.boards[ref.id];
-      const ok = confirm(`Delete board "${b?.title || ""}" and everything inside it?`);
-      if (!ok) return;
+      if (!confirm(`Delete board "${b?.title || ""}" and everything inside it?`)) return;
       deleteBoardRecursive(state, ref.id);
       board.slots[slotIndex] = null;
       saveState(state);
@@ -378,24 +478,16 @@ function onSlotClick(state, boardId, slotIndex) {
     }
   }
 
-  // ---- MOVE MODE (grid-based) ----
-  if (currentTool === "move") {
+  // MOVE MODE: pick source tile, then choose destination slot (empty or swap)
+  if (mode === "move") {
     if (!movePick) {
-      // pick source
-      if (!ref) return; // can't pick empty
+      if (!ref) return; // must pick a tile
       movePick = { boardId, slotIndex };
       render();
       return;
     }
 
     // drop
-    if (movePick.boardId !== boardId) {
-      // should never happen in this UI, but safe
-      movePick = null;
-      render();
-      return;
-    }
-
     const src = movePick.slotIndex;
     const dst = slotIndex;
 
@@ -405,7 +497,6 @@ function onSlotClick(state, boardId, slotIndex) {
       return;
     }
 
-    // swap allowed (even if dst occupied)
     const tmp = board.slots[dst];
     board.slots[dst] = board.slots[src];
     board.slots[src] = tmp;
@@ -416,52 +507,21 @@ function onSlotClick(state, boardId, slotIndex) {
     return;
   }
 
-  // ---- NORMAL CREATION TOOLS ----
-  if (!ref) {
-    const idx = slotIndex;
+  // NORMAL MODE: clicking tiles does open/edit
+  if (!ref) return;
 
-    if (currentTool === "board") {
-      const newBoardId = uid();
-      state.boards[newBoardId] = { id: newBoardId, parentId: boardId, title: "New Board", slots: Array(DEFAULT_SLOTS).fill(null) };
-      board.slots[idx] = { type: "board", id: newBoardId };
-      saveState(state);
-      render();
-      return;
-    }
-
-    if (currentTool === "note" || currentTool === "link") {
-      openModal({
-        kind: currentTool,
-        mode: "new",
-        initialTitle: "",
-        initialContent: "",
-        onSave: ({ title, content }) => {
-          const itemId = uid();
-          state.items[itemId] = { id: itemId, boardId, kind: currentTool, title, content };
-          board.slots[idx] = { type: "item", id: itemId };
-          saveState(state);
-          render();
-        }
-      });
-      return;
-    }
-  }
-
-  // ---- CLICK ON EXISTING TILE (edit/open) ----
-  if (ref && ref.type === "board") {
-    // open board
-    setCurrentBoard(ref.id);
+  if (ref.type === "board") {
+    setCurrentBoard(ref.id); // ✅ nested boards
     return;
   }
 
-  if (ref && ref.type === "item") {
+  if (ref.type === "item") {
     const it = state.items[ref.id];
     if (!it) return;
 
-    // edit note/link in modal
     openModal({
       kind: it.kind,
-      mode: "edit",
+      modeLabel: "edit",
       initialTitle: it.title || "",
       initialContent: it.content || "",
       onSave: ({ title, content }) => {
@@ -475,8 +535,8 @@ function onSlotClick(state, boardId, slotIndex) {
   }
 }
 
-// ----- Export / Import -----
-document.getElementById("exportBtn").onclick = () => {
+// Export / Import
+exportBtn.onclick = () => {
   const data = localStorage.getItem(STORAGE_KEY) || "{}";
   const blob = new Blob([data], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -487,7 +547,7 @@ document.getElementById("exportBtn").onclick = () => {
   URL.revokeObjectURL(url);
 };
 
-document.getElementById("importInput").addEventListener("change", async (e) => {
+importInput.addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
 
@@ -497,8 +557,7 @@ document.getElementById("importInput").addEventListener("change", async (e) => {
     const migrated = migrateIfNeeded(parsed);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
     location.hash = "#/";
-    movePick = null;
-    setTool("board");
+    setMode("none");
     render();
   } catch {
     alert("Import failed: invalid JSON.");
@@ -512,4 +571,5 @@ window.addEventListener("hashchange", () => {
   movePick = null;
   render();
 });
+
 render();
