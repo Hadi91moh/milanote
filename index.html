@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Boards</title>
+
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#111111" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+  <header class="top">
+    <a class="brand" href="#/">Boards</a>
+
+    <button id="exportBtn" type="button">Export</button>
+
+    <label class="btnLike">
+      Import
+      <input id="importInput" type="file" accept="application/json" hidden />
+    </label>
+  </header>
+
+  <main id="app"></main>
+
+  <script src="./app.js"></script>
+  <script>
+    // Service workers need a secure context (HTTPS), except localhost for dev. :contentReference[oaicite:5]{index=5}
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js");
+    }
+  </script>
+</body>
+</html>

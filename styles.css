@@ -1,0 +1,12 @@
+body { font-family: system-ui, Arial; margin: 0; background: #fafafa; color: #111; }
+.top { position: sticky; top: 0; background: white; border-bottom: 1px solid #ddd; padding: 12px; display: flex; gap: 10px; align-items: center; }
+.brand { font-weight: 700; text-decoration: none; color: #111; margin-right: auto; }
+main { max-width: 980px; margin: 18px auto; padding: 0 14px; }
+.card { background: white; border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin: 12px 0; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.col { flex: 1; min-width: 280px; }
+.small { color: #666; font-size: 14px; }
+input, select, textarea, button { padding: 10px; font-size: 16px; }
+button, .btnLike { cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 10px; padding: 10px; }
+a { color: #0a58ca; text-decoration: none; }
+textarea { width: 100%; }

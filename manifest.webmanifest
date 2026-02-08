@@ -1,0 +1,9 @@
+{
+  "name": "Boards",
+  "short_name": "Boards",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#111111"
+}
