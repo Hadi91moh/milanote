@@ -1,13 +1,13 @@
-const STORAGE_KEY = "boards_state_v6";
+const STORAGE_KEY = "boards_state_v7";
 
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
 const GRID_MIN = 20;
 const GRID_MAX = 400;
 
-// ✅ Default size for Note/Link = 2x2 blocks
-const DEFAULT_ITEM_W = 2;
-const DEFAULT_ITEM_H = 2;
+// Defaults per type
+const NOTE_DEFAULT_W = 2, NOTE_DEFAULT_H = 2;
+const LINK_DEFAULT_W = 3, LINK_DEFAULT_H = 1; // ✅ requested
 
 const elGrid = document.getElementById("grid");
 const elCrumbs = document.getElementById("crumbs");
@@ -15,7 +15,7 @@ const elGridInfo = document.getElementById("gridInfo");
 
 const overlay = document.getElementById("modalOverlay");
 const modalTitle = document.getElementById("modalTitle");
-const modalInputTitle = document.getElementById("modalInputTitle");     // unused but exists in HTML
+const modalInputTitle = document.getElementById("modalInputTitle");     // exists in HTML
 const modalInputContent = document.getElementById("modalInputContent"); // used for board name
 const modalContentLabel = document.getElementById("modalContentLabel");
 const modalHint = document.getElementById("modalHint");
@@ -46,7 +46,6 @@ let inlineEdit = null;    // { itemId, draft } or null
 function uid() {
   return (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
 }
-
 function safeParseJSON(raw) { try { return JSON.parse(raw); } catch { return null; } }
 
 function initBoard(title, parentId) {
@@ -68,12 +67,10 @@ function migrateIfNeeded(state) {
   }
 
   for (const it of Object.values(state.items)) {
-    if (typeof it.w !== "number") it.w = DEFAULT_ITEM_W;
-    if (typeof it.h !== "number") it.h = DEFAULT_ITEM_H;
+    if (typeof it.w !== "number") it.w = (it.kind === "link" ? LINK_DEFAULT_W : NOTE_DEFAULT_W);
+    if (typeof it.h !== "number") it.h = (it.kind === "link" ? LINK_DEFAULT_H : NOTE_DEFAULT_H);
     it.w = Math.max(1, it.w);
     it.h = Math.max(1, it.h);
-
-    // We no longer use per-item title, keep for backward compat
     if (typeof it.content !== "string") it.content = "";
   }
 
@@ -87,7 +84,6 @@ function loadState() {
   saveState(state);
   return state;
 }
-
 function saveState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -98,7 +94,6 @@ function getCurrentBoardId(state) {
   const root = Object.values(state.boards).find(b => b.parentId === null);
   return root?.id;
 }
-
 function setCurrentBoard(boardId) {
   location.hash = `#/b/${boardId}`;
 }
@@ -137,7 +132,7 @@ function indexToRowCol(index, cols) {
 function rectCellsFromAnchor(anchorIndex, w, h, cols, maxSlots) {
   const { row: r0, col: c0 } = indexToRowCol(anchorIndex, cols);
   const cells = [];
-  if (c0 + w - 1 > cols) return [];
+  if (c0 + w - 1 > cols) return []; // prevent wrap
 
   for (let dr = 0; dr < h; dr++) {
     for (let dc = 0; dc < w; dc++) {
@@ -166,7 +161,6 @@ function buildOccupancy(board, state, cols) {
   for (let i = 0; i < board.slots.length; i++) {
     const ref = board.slots[i];
     if (!ref) continue;
-
     const { w, h } = getSpanForRef(ref, state);
     const cells = rectCellsFromAnchor(i, w, h, cols, board.slots.length);
     for (const cell of cells) {
@@ -179,8 +173,8 @@ function buildOccupancy(board, state, cols) {
 function firstFreeCell(board, state, cols) {
   const occ = buildOccupancy(board, state, cols);
   for (let i = 0; i < board.slots.length; i++) {
-    if (board.slots[i] !== null) continue;
-    if (occ.has(i)) continue;
+    if (board.slots[i] !== null) continue; // must be empty anchor
+    if (occ.has(i)) continue;              // must be empty footprint
     return i;
   }
   return -1;
@@ -236,9 +230,8 @@ function openBoardNameModal({ title, initialName, onOk }) {
   modalContentLabel.textContent = "Board name";
   modalHint.textContent = "";
 
-  // Our HTML has two inputs; we use modalInputContent for name field
   modalInputTitle.value = "";
-  modalInputTitle.style.display = "none"; // hide unused
+  modalInputTitle.style.display = "none";
   modalInputContent.value = initialName || "";
   modalInputContent.placeholder = "Example: Projects";
 
@@ -283,8 +276,6 @@ modeSizeBtn.onclick = () => setMode(mode === "size" ? "none" : "size");
 modeTrashBtn.onclick = () => setMode(mode === "trash" ? "none" : "trash");
 
 /* ---------- Create actions ---------- */
-
-// 3) Create board → ask for name and show name on board card
 actionBoard.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
@@ -310,7 +301,6 @@ actionBoard.onclick = () => {
   });
 };
 
-// 1) Note default 2x2
 actionNote.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
@@ -327,7 +317,7 @@ actionNote.onclick = () => {
   state.items[itemId] = {
     id: itemId, boardId, kind: "note",
     content: "",
-    w: DEFAULT_ITEM_W, h: DEFAULT_ITEM_H
+    w: NOTE_DEFAULT_W, h: NOTE_DEFAULT_H
   };
   board.slots[idx] = { type: "item", id: itemId };
 
@@ -335,7 +325,6 @@ actionNote.onclick = () => {
   render();
 };
 
-// 2) Link default 2x2
 actionLink.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
@@ -352,7 +341,7 @@ actionLink.onclick = () => {
   state.items[itemId] = {
     id: itemId, boardId, kind: "link",
     content: "",
-    w: DEFAULT_ITEM_W, h: DEFAULT_ITEM_H
+    w: LINK_DEFAULT_W, h: LINK_DEFAULT_H   // ✅ default 3x1
   };
   board.slots[idx] = { type: "item", id: itemId };
 
@@ -360,7 +349,6 @@ actionLink.onclick = () => {
   render();
 };
 
-// Rename current board (top bar rename button)
 btnRename.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
@@ -403,6 +391,33 @@ btnGridMinus.onclick = () => {
   }
 };
 
+/* ---------- Size + overlap safe setter ---------- */
+function canPlaceRect(board, state, cols, anchorIndex, newW, newH) {
+  const occ = buildOccupancy(board, state, cols);
+  const cells = rectCellsFromAnchor(anchorIndex, newW, newH, cols, board.slots.length);
+  if (cells.length === 0) return false;
+
+  for (const cell of cells) {
+    const owner = occ.get(cell);
+    // allowed if empty or owned by this same anchor
+    if (owner !== undefined && owner !== anchorIndex) return false;
+  }
+  return true;
+}
+
+function applyResize(board, state, cols, anchorIndex, newW, newH) {
+  const ref = board.slots[anchorIndex];
+  if (!ref || ref.type !== "item") return false;
+  const it = state.items[ref.id];
+  if (!it) return false;
+
+  if (!canPlaceRect(board, state, cols, anchorIndex, newW, newH)) return false;
+
+  it.w = newW;
+  it.h = newH;
+  return true;
+}
+
 /* ---------- Render helpers ---------- */
 function placeGrid(el, index, cols, spanW = 1, spanH = 1) {
   const { row, col } = indexToRowCol(index, cols);
@@ -412,7 +427,7 @@ function placeGrid(el, index, cols, spanW = 1, spanH = 1) {
   el.style.gridRowEnd = `span ${spanH}`;
 }
 
-// preserve exact content (no trim!)
+// preserve exact content (no trim)
 function commitInlineEdit(state) {
   if (!inlineEdit) return false;
   const it = state.items[inlineEdit.itemId];
@@ -421,12 +436,10 @@ function commitInlineEdit(state) {
   return true;
 }
 
-// for clickable link, use first line only (does NOT change stored content)
-function normalizeHref(raw) {
-  const s = (raw ?? "");
-  const firstLine = s.split("\n")[0].trim();
-  if (!firstLine) return "";
-  return /^https?:\/\//i.test(firstLine) ? firstLine : `https://${firstLine}`;
+function normalizeHrefFromLine(line) {
+  const s = (line ?? "").trim();
+  if (!s) return "";
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
 }
 
 function render() {
@@ -498,7 +511,6 @@ function render() {
 
       card.onclick = () => {
         if (mode === "trash") return onClickTile(state, boardId, i, ref);
-        // open board
         setCurrentBoard(ref.id);
       };
 
@@ -506,7 +518,7 @@ function render() {
       continue;
     }
 
-    // NOTE/LINK card (plain text only, no title field)
+    // NOTE/LINK card
     if (ref.type === "item") {
       const it = state.items[ref.id];
       const kind = it?.kind || "note";
@@ -530,7 +542,7 @@ function render() {
 
           ${
             kind === "link"
-              ? `<input class="inlineUrl" placeholder="Paste link here (optional)" value="${escapeHtml(draft)}">`
+              ? `<textarea class="inlineUrl" placeholder="One link per line (Enter = new line)">${escapeHtml(draft)}</textarea>`
               : `<textarea class="inlineBody" placeholder="Write here (optional)">${escapeHtml(draft)}</textarea>`
           }
 
@@ -564,7 +576,6 @@ function render() {
           render();
         };
 
-        // clicking card shouldn't close edit mode
         card.onclick = (e) => e.stopPropagation();
 
       } else {
@@ -572,12 +583,14 @@ function render() {
 
         let bodyHtml = "";
         if (kind === "link") {
-          const href = normalizeHref(raw);
-          if (href) {
-            bodyHtml = `<a target="_blank" href="${escapeHtml(href)}" onclick="event.stopPropagation()">${escapeHtml(raw || href)}</a>`;
-          } else {
-            bodyHtml = `<div style="opacity:.6">(empty link)</div>`;
-          }
+          const lines = raw.split("\n");
+          bodyHtml = lines.map(line => {
+            // preserve blank lines visually
+            if (line === "") return `<div class="linkLine">&nbsp;</div>`;
+            const href = normalizeHrefFromLine(line);
+            if (!href) return `<div class="linkLine">${escapeHtml(line)}</div>`;
+            return `<div class="linkLine"><a target="_blank" href="${escapeHtml(href)}" onclick="event.stopPropagation()">${escapeHtml(line)}</a></div>`;
+          }).join("");
         } else {
           bodyHtml = escapeHtml(raw);
         }
@@ -591,7 +604,7 @@ function render() {
           <div class="cardHint">${
             mode === "trash" ? "Click to delete" :
             mode === "move"  ? "Move: pick then click empty slot" :
-            mode === "size"  ? `Size: click empty slot to expand • ${sizeText}` :
+            mode === "size"  ? `Size: click empty slot • tap selected tile = 1×1` :
             sizeText
           }</div>
         `;
@@ -626,8 +639,8 @@ function onClickEmptyCell(state, boardId, destIndex) {
     if (cells.length === 0) return;
 
     for (const cell of cells) {
-      const anchorAtCell = occ.get(cell);
-      if (anchorAtCell !== undefined && anchorAtCell !== src) return;
+      const owner = occ.get(cell);
+      if (owner !== undefined && owner !== src) return;
     }
 
     board.slots[destIndex] = ref;
@@ -657,16 +670,8 @@ function onClickEmptyCell(state, boardId, destIndex) {
     const newW = d.col - a.col + 1;
     const newH = d.row - a.row + 1;
 
-    const cells = rectCellsFromAnchor(anchorIndex, newW, newH, cols, board.slots.length);
-    if (cells.length === 0) return;
-
-    for (const cell of cells) {
-      const anchorAtCell = occ.get(cell);
-      if (anchorAtCell !== undefined && anchorAtCell !== anchorIndex) return;
-    }
-
-    it.w = newW;
-    it.h = newH;
+    // ✅ overlap-safe resize
+    if (!applyResize(board, state, cols, anchorIndex, newW, newH)) return;
 
     saveState(state);
     render();
@@ -723,16 +728,32 @@ function onClickTile(state, boardId, slotIndex, ref) {
 
     if (ref.type === "item") {
       const it = state.items[ref.id];
-      if (it && (it.kind === "note" || it.kind === "link")) {
-        if (sizePick && sizePick.anchorIndex === slotIndex) {
-          it.w = DEFAULT_ITEM_W;
-          it.h = DEFAULT_ITEM_H;
-          sizePick = null;
-          saveState(state);
-          render();
-          return;
-        }
+      if (!it || (it.kind !== "note" && it.kind !== "link")) return;
+
+      // select tile for sizing
+      if (!sizePick || sizePick.anchorIndex !== slotIndex) {
         sizePick = { anchorIndex: slotIndex, itemId: ref.id };
+        render();
+        return;
+      }
+
+      // ✅ tap selected tile again => shrink to 1x1
+      // if already 1x1 => try return to default size (overlap-safe)
+      const cols = getCols();
+      if (it.w !== 1 || it.h !== 1) {
+        it.w = 1; it.h = 1;
+        saveState(state);
+        render();
+        return;
+      } else {
+        const defW = (it.kind === "link") ? LINK_DEFAULT_W : NOTE_DEFAULT_W;
+        const defH = (it.kind === "link") ? LINK_DEFAULT_H : NOTE_DEFAULT_H;
+        const ok = applyResize(board, state, cols, slotIndex, defW, defH);
+        if (!ok) {
+          alert("Not enough empty space to return to default size here. Move tiles or pick a free area.");
+        } else {
+          saveState(state);
+        }
         render();
         return;
       }
