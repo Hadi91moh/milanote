@@ -1,15 +1,15 @@
-const STORAGE_KEY = "boards_state_v7";
+const STORAGE_KEY = "boards_state_v8";
 
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
 const GRID_MIN = 20;
 const GRID_MAX = 400;
 
-// ✅ Defaults per kind
+// Defaults per kind
 const DEFAULT_NOTE_W = 2;
 const DEFAULT_NOTE_H = 2;
 
-const DEFAULT_LINK_W = 3; // ✅ requested
+const DEFAULT_LINK_W = 3;
 const DEFAULT_LINK_H = 1;
 
 const elGrid = document.getElementById("grid");
@@ -18,8 +18,8 @@ const elGridInfo = document.getElementById("gridInfo");
 
 const overlay = document.getElementById("modalOverlay");
 const modalTitle = document.getElementById("modalTitle");
-const modalInputTitle = document.getElementById("modalInputTitle");     // unused but exists in HTML
-const modalInputContent = document.getElementById("modalInputContent"); // used for board name
+const modalInputTitle = document.getElementById("modalInputTitle");     // unused
+const modalInputContent = document.getElementById("modalInputContent"); // used for board name on create
 const modalContentLabel = document.getElementById("modalContentLabel");
 const modalHint = document.getElementById("modalHint");
 const modalSave = document.getElementById("modalSave");
@@ -36,7 +36,10 @@ const modeTrashBtn = document.getElementById("modeTrash");
 
 const btnGridPlus = document.getElementById("btnGridPlus");
 const btnGridMinus = document.getElementById("btnGridMinus");
+
+// remove/ignore rename button (we also hide it via CSS)
 const btnRename = document.getElementById("btnRename");
+if (btnRename) btnRename.style.display = "none";
 
 const exportBtn = document.getElementById("exportBtn");
 const importInput = document.getElementById("importInput");
@@ -44,7 +47,12 @@ const importInput = document.getElementById("importInput");
 let mode = "none";        // none | move | size | trash
 let movePick = null;      // { slotIndex } or null
 let sizePick = null;      // { anchorIndex, itemId } or null
-let inlineEdit = null;    // { itemId, draft } or null
+
+// inline editor state
+// type: "item" or "boardTile"
+// for item: { type:"item", itemId, draft }
+// for boardTile: { type:"boardTile", boardId, draftTitle }
+let inlineEdit = null;
 
 function uid() {
   return (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
@@ -73,6 +81,7 @@ function migrateIfNeeded(state) {
     if (b.slots.length < DEFAULT_SLOTS) {
       b.slots = b.slots.concat(Array(DEFAULT_SLOTS - b.slots.length).fill(null));
     }
+    if (typeof b.title !== "string") b.title = "Untitled";
   }
 
   for (const it of Object.values(state.items)) {
@@ -81,6 +90,7 @@ function migrateIfNeeded(state) {
     if (typeof it.h !== "number") it.h = 1;
     it.w = Math.max(1, it.w);
     it.h = Math.max(1, it.h);
+    if (typeof it.kind !== "string") it.kind = "note";
   }
 
   return state;
@@ -234,7 +244,7 @@ function deleteBoardRecursive(state, boardId) {
   }
 }
 
-/* ---------- Modal helpers (board name) ---------- */
+/* ---------- Modal for Create Board ---------- */
 function openBoardNameModal({ title, initialName, onOk }) {
   overlay.classList.remove("hidden");
 
@@ -275,6 +285,7 @@ function setMode(next) {
   mode = next;
   movePick = null;
   sizePick = null;
+  inlineEdit = null;
 
   modeMoveBtn.classList.toggle("on", mode === "move");
   modeSizeBtn.classList.toggle("on", mode === "size");
@@ -328,12 +339,7 @@ actionNote.onclick = () => {
 
   const itemId = uid();
   const d = defaultSizeForKind("note");
-
-  state.items[itemId] = {
-    id: itemId, boardId, kind: "note",
-    content: "",
-    w: d.w, h: d.h
-  };
+  state.items[itemId] = { id: itemId, boardId, kind: "note", content: "", w: d.w, h: d.h };
   board.slots[idx] = { type: "item", id: itemId };
 
   saveState(state);
@@ -354,89 +360,44 @@ actionLink.onclick = () => {
 
   const itemId = uid();
   const d = defaultSizeForKind("link");
-
-  state.items[itemId] = {
-    id: itemId, boardId, kind: "link",
-    content: "",
-    w: d.w, h: d.h
-  };
+  state.items[itemId] = { id: itemId, boardId, kind: "link", content: "", w: d.w, h: d.h };
   board.slots[idx] = { type: "item", id: itemId };
 
   saveState(state);
   render();
 };
 
-btnRename.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
+/* ---------- Content helpers ---------- */
 
-  openBoardNameModal({
-    title: "Rename Board",
-    initialName: board.title,
-    onOk: (name) => {
-      board.title = name;
-      saveState(state);
-      render();
-    }
-  });
-};
-
-/* ---------- Grid size controls ---------- */
-btnGridPlus.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  if (ensureGridSize(board, board.slots.length + GRID_STEP)) {
-    saveState(state);
-    render();
-  }
-};
-
-btnGridMinus.onclick = () => {
-  const state = loadState();
-  const boardId = getCurrentBoardId(state);
-  const board = state.boards[boardId];
-  if (!board) return;
-
-  if (ensureGridSize(board, board.slots.length - GRID_STEP)) {
-    saveState(state);
-    render();
-  }
-};
-
-/* ---------- Render helpers ---------- */
-function placeGrid(el, index, cols, spanW = 1, spanH = 1) {
-  const { row, col } = indexToRowCol(index, cols);
-  el.style.gridColumnStart = String(col);
-  el.style.gridRowStart = String(row);
-  el.style.gridColumnEnd = `span ${spanW}`;
-  el.style.gridRowEnd = `span ${spanH}`;
-}
-
-// preserve exact content (no trim!)
 function commitInlineEdit(state) {
   if (!inlineEdit) return false;
-  const it = state.items[inlineEdit.itemId];
-  if (!it) return false;
-  it.content = inlineEdit.draft ?? "";
-  return true;
+
+  if (inlineEdit.type === "item") {
+    const it = state.items[inlineEdit.itemId];
+    if (!it) return false;
+    it.content = inlineEdit.draft ?? "";
+    return true;
+  }
+
+  if (inlineEdit.type === "boardTile") {
+    const b = state.boards[inlineEdit.boardId];
+    if (!b) return false;
+    const t = (inlineEdit.draftTitle ?? "").trim();
+    if (!t) return false; // don't allow empty board name
+    b.title = t;
+    return true;
+  }
+
+  return false;
 }
 
-// ✅ Build view HTML for multi-line links: every non-empty line becomes a clickable link
+// multi-line links: each non-empty line clickable, blank lines preserved
 function linkHtmlFromContent(raw) {
   const s = raw ?? "";
   const lines = s.split("\n");
   let out = "";
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim() === "") {
-      out += "<br>";
-      continue;
-    }
+  for (const line of lines) {
+    if (line.trim() === "") { out += "<br>"; continue; }
     const hrefLine = line.trim();
     const href = /^https?:\/\//i.test(hrefLine) ? hrefLine : `https://${hrefLine}`;
     out += `<a target="_blank" href="${escapeHtml(href)}" onclick="event.stopPropagation()">${escapeHtml(line)}</a><br>`;
@@ -444,7 +405,8 @@ function linkHtmlFromContent(raw) {
   return out || `<div style="opacity:.6">(empty link)</div>`;
 }
 
-// ✅ Unified resize with collision check (prevents overlaps always)
+/* ---------- Resize safety ---------- */
+
 function trySetItemSize(state, boardId, anchorIndex, newW, newH) {
   const board = state.boards[boardId];
   const ref = board?.slots?.[anchorIndex];
@@ -461,14 +423,22 @@ function trySetItemSize(state, boardId, anchorIndex, newW, newH) {
 
   for (const cell of cells) {
     const anchorAtCell = occ.get(cell);
-    if (anchorAtCell !== undefined && anchorAtCell !== anchorIndex) {
-      return false; // collision
-    }
+    if (anchorAtCell !== undefined && anchorAtCell !== anchorIndex) return false;
   }
 
   it.w = newW;
   it.h = newH;
   return true;
+}
+
+/* ---------- Render ---------- */
+
+function placeGrid(el, index, cols, spanW = 1, spanH = 1) {
+  const { row, col } = indexToRowCol(index, cols);
+  el.style.gridColumnStart = String(col);
+  el.style.gridRowStart = String(row);
+  el.style.gridColumnEnd = `span ${spanW}`;
+  el.style.gridRowEnd = `span ${spanH}`;
 }
 
 function render() {
@@ -495,7 +465,7 @@ function render() {
 
   elGrid.innerHTML = "";
 
-  // Slot overlays for targets (move/size)
+  // slot overlays
   for (let i = 0; i < board.slots.length; i++) {
     const slot = document.createElement("div");
     slot.className = "slot";
@@ -512,7 +482,7 @@ function render() {
     elGrid.appendChild(slot);
   }
 
-  // Cards for anchors
+  // tiles
   for (let i = 0; i < board.slots.length; i++) {
     const ref = board.slots[i];
     if (!ref) continue;
@@ -524,30 +494,76 @@ function render() {
     if (mode === "move" && movePick && movePick.slotIndex === i) card.classList.add("selected");
     if (mode === "size" && sizePick && sizePick.anchorIndex === i) card.classList.add("selected");
 
-    // BOARD card (title only)
+    // BOARD TILE
     if (ref.type === "board") {
       const b = state.boards[ref.id];
       placeGrid(card, i, cols, 1, 1);
 
-      card.innerHTML = `
-        <div class="cardHeader">
-          <div class="badge">BOARD</div>
-          <div class="badge">▦</div>
-        </div>
-        <div class="cardTitle">${escapeHtml(b?.title || "Board")}</div>
-        <div class="cardHint"></div>
-      `;
+      const editing = inlineEdit && inlineEdit.type === "boardTile" && inlineEdit.boardId === ref.id;
 
-      card.onclick = () => {
-        if (mode === "trash") return onClickTile(state, boardId, i, ref);
-        setCurrentBoard(ref.id);
-      };
+      if (editing) {
+        card.innerHTML = `
+          <div class="cardHeader">
+            <div class="badge">BOARD</div>
+            <div class="badge">▦</div>
+          </div>
+
+          <textarea class="inlineBody" placeholder="Board name">${escapeHtml(inlineEdit.draftTitle ?? "")}</textarea>
+
+          <div class="inlineActions">
+            <button class="tinyBtn">Cancel</button>
+            <button class="tinyBtn primary">Save</button>
+          </div>
+        `;
+
+        const bodyEl = card.querySelector(".inlineBody");
+        const cancelEl = card.querySelector(".tinyBtn");
+        const saveEl = card.querySelector(".tinyBtn.primary");
+
+        bodyEl.style.minHeight = "60px";
+        bodyEl.style.flex = "1 1 auto";
+
+        bodyEl.oninput = () => { inlineEdit.draftTitle = bodyEl.value; };
+        bodyEl.onpointerdown = (e) => e.stopPropagation();
+        setTimeout(() => bodyEl.focus(), 0);
+
+        cancelEl.onclick = (e) => { e.stopPropagation(); inlineEdit = null; render(); };
+        saveEl.onclick = (e) => {
+          e.stopPropagation();
+          if (commitInlineEdit(state)) saveState(state);
+          inlineEdit = null;
+          render();
+        };
+
+        card.onclick = (e) => e.stopPropagation();
+      } else {
+        card.innerHTML = `
+          <div class="cardHeader">
+            <div class="badge">BOARD</div>
+            <div class="badge">▦</div>
+          </div>
+          <div class="cardTitle">${escapeHtml(b?.title || "Board")}</div>
+          <div class="cardHint">${
+            mode === "trash" ? "Click to delete" :
+            "Tap to rename • Long-press (open) not needed"
+          }</div>
+        `;
+
+        // Tap board tile => rename (like note/link)
+        card.onclick = () => onClickTile(state, boardId, i, ref);
+
+        // Double click (desktop) to open board quickly
+        card.ondblclick = (e) => {
+          e.stopPropagation();
+          if (mode !== "trash") setCurrentBoard(ref.id);
+        };
+      }
 
       elGrid.appendChild(card);
       continue;
     }
 
-    // NOTE/LINK card (plain text only)
+    // ITEM TILE
     if (ref.type === "item") {
       const it = state.items[ref.id];
       const kind = it?.kind || "note";
@@ -558,12 +574,11 @@ function render() {
       placeGrid(card, i, cols, spanW, spanH);
 
       const sizeText = `Size: ${spanW}×${spanH}`;
-      const editing = inlineEdit && inlineEdit.itemId === ref.id;
+      const editing = inlineEdit && inlineEdit.type === "item" && inlineEdit.itemId === ref.id;
 
       if (editing) {
         const draft = inlineEdit.draft ?? "";
 
-        // ✅ Link editor is textarea now (supports Enter + multi-line)
         card.innerHTML = `
           <div class="cardHeader">
             <div class="badge">${escapeHtml(kind.toUpperCase())}</div>
@@ -571,9 +586,7 @@ function render() {
           </div>
 
           <textarea class="inlineBody" placeholder="${
-            kind === "link"
-              ? "Paste one link per line (optional)"
-              : "Write here (optional)"
+            kind === "link" ? "Paste one link per line (optional)" : "Write here (optional)"
           }">${escapeHtml(draft)}</textarea>
 
           <div class="cardHint">${sizeText}</div>
@@ -590,15 +603,9 @@ function render() {
 
         bodyEl.oninput = () => { inlineEdit.draft = bodyEl.value; };
         bodyEl.onpointerdown = (e) => e.stopPropagation();
-
         setTimeout(() => bodyEl.focus(), 0);
 
-        cancelEl.onclick = (e) => {
-          e.stopPropagation();
-          inlineEdit = null;
-          render();
-        };
-
+        cancelEl.onclick = (e) => { e.stopPropagation(); inlineEdit = null; render(); };
         saveEl.onclick = (e) => {
           e.stopPropagation();
           if (commitInlineEdit(state)) saveState(state);
@@ -610,13 +617,7 @@ function render() {
 
       } else {
         const raw = it?.content || "";
-
-        let bodyHtml = "";
-        if (kind === "link") {
-          bodyHtml = linkHtmlFromContent(raw);
-        } else {
-          bodyHtml = escapeHtml(raw);
-        }
+        const bodyHtml = (kind === "link") ? linkHtmlFromContent(raw) : escapeHtml(raw);
 
         card.innerHTML = `
           <div class="cardHeader">
@@ -641,7 +642,7 @@ function render() {
   }
 }
 
-/* ---------- Interactions ---------- */
+/* ---------- Click handlers ---------- */
 
 function onClickEmptyCell(state, boardId, destIndex) {
   const board = state.boards[boardId];
@@ -693,7 +694,6 @@ function onClickEmptyCell(state, boardId, destIndex) {
     const newW = d.col - a.col + 1;
     const newH = d.row - a.row + 1;
 
-    // ✅ collision-safe resize
     if (trySetItemSize(state, boardId, anchorIndex, newW, newH)) {
       saveState(state);
       render();
@@ -705,10 +705,16 @@ function onClickEmptyCell(state, boardId, destIndex) {
 function onClickTile(state, boardId, slotIndex, ref) {
   const board = state.boards[boardId];
 
-  // Save if editing and you clicked another tile
-  if (inlineEdit && !(ref.type === "item" && inlineEdit.itemId === ref.id)) {
-    if (commitInlineEdit(state)) saveState(state);
-    inlineEdit = null;
+  // If editing something else, save it first (best effort)
+  if (inlineEdit) {
+    // If you click the same editing tile, do nothing
+    const sameBoardTile = (inlineEdit.type === "boardTile" && ref.type === "board" && inlineEdit.boardId === ref.id);
+    const sameItem = (inlineEdit.type === "item" && ref.type === "item" && inlineEdit.itemId === ref.id);
+    if (!sameBoardTile && !sameItem) {
+      commitInlineEdit(state);
+      saveState(state);
+      inlineEdit = null;
+    }
   }
 
   // TRASH
@@ -753,7 +759,6 @@ function onClickTile(state, boardId, slotIndex, ref) {
       const it = state.items[ref.id];
       if (!it || (it.kind !== "note" && it.kind !== "link")) return;
 
-      // If clicking the same selected tile: toggle 1x1 <-> default (with collision check!)
       if (sizePick && sizePick.anchorIndex === slotIndex) {
         const def = defaultSizeForKind(it.kind);
         const wantOne = !(it.w === 1 && it.h === 1);
@@ -761,7 +766,6 @@ function onClickTile(state, boardId, slotIndex, ref) {
         const nextH = wantOne ? 1 : def.h;
 
         if (trySetItemSize(state, boardId, slotIndex, nextW, nextH)) {
-          // keep it selected
           saveState(state);
           render();
         }
@@ -774,29 +778,57 @@ function onClickTile(state, boardId, slotIndex, ref) {
     }
 
     if (ref.type === "board") {
-      sizePick = null;
-      setCurrentBoard(ref.id);
+      // size mode doesn't apply to board tiles
       return;
     }
 
     return;
   }
 
-  // NORMAL: open item editor
+  // NORMAL MODE:
+  if (ref.type === "board") {
+    // ✅ Tap board tile => rename it inline (NOT open)
+    inlineEdit = { type: "boardTile", boardId: ref.id, draftTitle: state.boards[ref.id]?.title || "" };
+    render();
+    return;
+  }
+
   if (ref.type === "item") {
     const it = state.items[ref.id];
     if (!it) return;
 
-    inlineEdit = {
-      itemId: ref.id,
-      draft: it.content || ""
-    };
+    inlineEdit = { type: "item", itemId: ref.id, draft: it.content || "" };
     render();
     return;
   }
 }
 
-// Routing
+/* ---------- Top bar + routing ---------- */
+
+btnGridPlus.onclick = () => {
+  const state = loadState();
+  const boardId = getCurrentBoardId(state);
+  const board = state.boards[boardId];
+  if (!board) return;
+
+  if (ensureGridSize(board, board.slots.length + GRID_STEP)) {
+    saveState(state);
+    render();
+  }
+};
+
+btnGridMinus.onclick = () => {
+  const state = loadState();
+  const boardId = getCurrentBoardId(state);
+  const board = state.boards[boardId];
+  if (!board) return;
+
+  if (ensureGridSize(board, board.slots.length - GRID_STEP)) {
+    saveState(state);
+    render();
+  }
+};
+
 window.addEventListener("hashchange", () => {
   movePick = null;
   sizePick = null;
@@ -804,7 +836,8 @@ window.addEventListener("hashchange", () => {
   render();
 });
 
-// Export / Import
+/* ---------- Export / Import ---------- */
+
 exportBtn.onclick = () => {
   const data = localStorage.getItem(STORAGE_KEY) || "{}";
   const blob = new Blob([data], { type: "application/json" });
