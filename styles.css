@@ -160,7 +160,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 
 .cardHeader{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .badge{font-size:12px;color:var(--muted)}
-.cardTitle{font-weight:700; font-size:14px; line-height:1.2}
+.cardTitle{font-weight:800; font-size:14px; line-height:1.2}
 .cardHint{
   font-size:12px;
   color:var(--muted);
@@ -170,7 +170,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 .card.trashPulse{outline:2px solid #ff000035}
 .card.selected{outline:3px solid #11111125}
 
-/* ✅ Non-edit view: scrollable and preserves ALL spaces/newlines */
+/* ✅ View mode content: scrollable + preserves newlines/spaces */
 .itemBody{
   flex:1 1 auto;
   min-height:0;
@@ -194,8 +194,8 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 }
 .itemBody.link a:hover{ text-decoration:underline; }
 
-/* ✅ Inline editor */
-.inlineTitle, .inlineUrl{
+/* ✅ Inline editor (NO title field now) */
+.inlineUrl{
   width:100%;
   border:1px solid var(--border);
   border-radius:12px;
@@ -204,8 +204,6 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   flex:0 0 auto;
 }
 
-/* ✅ KEY: textarea uses remaining height and scrolls inside.
-   No buttons anymore, so nothing can be hidden. */
 .inlineBody{
   width:100%;
   border:1px solid var(--border);
@@ -221,7 +219,30 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   white-space:pre-wrap;
 }
 
-/* Modal (Rename board only) */
+/* ✅ Nice Save/Cancel buttons (like before) */
+.inlineActions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  flex:0 0 auto;
+}
+
+.tinyBtn{
+  border:1px solid var(--border);
+  background:#fff;
+  border-radius:12px;
+  padding:10px 14px;
+  cursor:pointer;
+  font-size:13px;
+}
+
+.tinyBtn.primary{
+  border-color:#111;
+  background:#111;
+  color:#fff;
+}
+
+/* Modal (Rename board / Create board) */
 .modalOverlay{
   position:fixed; inset:0;
   background:rgba(0,0,0,.35);
@@ -233,7 +254,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 }
 .modalOverlay.hidden{display:none}
 .modal{
-  width:min(720px, 96vw);
+  width:min(520px, 96vw);
   background:#fff;
   border-radius:18px;
   box-shadow:var(--shadow);
@@ -254,7 +275,6 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   padding:10px 12px;
   font-size:16px;
 }
-.fieldTextarea{resize:vertical}
 .hint{font-size:12px;color:var(--muted)}
 
 .modalFooter{
