@@ -300,3 +300,6 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   padding:10px 14px;
   cursor:pointer;
 }
+
+/* Hide top-right Rename button (we rename by tapping board tiles) */
+#btnRename { display: none !important; }
