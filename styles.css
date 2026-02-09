@@ -170,7 +170,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 .card.trashPulse{outline:2px solid #ff000035}
 .card.selected{outline:3px solid #11111125}
 
-/* ✅ View mode content: scrollable + preserves newlines/spaces */
+/* View mode content: scrollable + preserves newlines/spaces */
 .itemBody{
   flex:1 1 auto;
   min-height:0;
@@ -181,27 +181,38 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   padding-right:4px;
 }
 
-/* Link view */
+/* Link view: prefer NOT wrapping; allow horizontal scroll */
 .itemBody.link{
-  white-space:pre-wrap;
-  word-break:break-word;
+  white-space:pre;      /* prevents wrapping */
+  overflow:auto;        /* gives horizontal scroll for long URLs */
+  word-break:normal;
 }
+
+/* Each link line */
+.linkLine{
+  white-space:pre;      /* preserve spaces */
+}
+
+/* Link style */
 .itemBody.link a{
   color:#0a58ca;
   text-decoration:none;
-  white-space:pre-wrap;
-  word-break:break-all;
+  white-space:pre;
 }
 .itemBody.link a:hover{ text-decoration:underline; }
 
-/* ✅ Inline editor (NO title field now) */
+/* Inline editor (plain text only) */
 .inlineUrl{
   width:100%;
   border:1px solid var(--border);
   border-radius:12px;
   padding:10px 10px;
   font-size:14px;
-  flex:0 0 auto;
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+  resize:none;
+  white-space:pre;
 }
 
 .inlineBody{
@@ -219,7 +230,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   white-space:pre-wrap;
 }
 
-/* ✅ Nice Save/Cancel buttons (like before) */
+/* Nice Save/Cancel buttons */
 .inlineActions{
   display:flex;
   justify-content:flex-end;
@@ -242,7 +253,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   color:#fff;
 }
 
-/* Modal (Rename board / Create board) */
+/* Modal (board name) */
 .modalOverlay{
   position:fixed; inset:0;
   background:rgba(0,0,0,.35);
