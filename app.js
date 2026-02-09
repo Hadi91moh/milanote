@@ -1,15 +1,13 @@
-// Storage model:
-// state = {
-//   boards: { [id]: { id, parentId, title, slots: Array(null | {type:'board'|'item', id}) } },
-//   items:  { [id]: { id, boardId, kind:'note'|'link', title, content, w, h } }
-// }
-
-const STORAGE_KEY = "boards_state_v4";
+const STORAGE_KEY = "boards_state_v5";
 
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
 const GRID_MIN = 20;
 const GRID_MAX = 400;
+
+// ✅ Default size = 2x2 (4 blocks)
+const DEFAULT_ITEM_W = 2;
+const DEFAULT_ITEM_H = 2;
 
 const elGrid = document.getElementById("grid");
 const elCrumbs = document.getElementById("crumbs");
@@ -42,8 +40,8 @@ const importInput = document.getElementById("importInput");
 
 let mode = "none";        // none | move | size | trash
 let movePick = null;      // { slotIndex } or null
-let sizePick = null;      // { anchorIndex, itemId, destIndex } or null
-let inlineEdit = null;    // { itemId, kind, title, content } or null
+let sizePick = null;      // { anchorIndex, itemId } or null
+let inlineEdit = null;    // { itemId, title, content } or null
 
 function uid() {
   return (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
@@ -57,6 +55,7 @@ function initBoard(title, parentId) {
 }
 
 function migrateIfNeeded(state) {
+  // Fresh install
   if (!state || !state.boards || !state.items) {
     const root = initBoard("My Board", null);
     return { boards: { [root.id]: root }, items: {} };
@@ -70,10 +69,10 @@ function migrateIfNeeded(state) {
   }
 
   for (const it of Object.values(state.items)) {
-    if (typeof it.w !== "number") it.w = 1;
-    if (typeof it.h !== "number") it.h = 1;
-    if (it.w < 1) it.w = 1;
-    if (it.h < 1) it.h = 1;
+    if (typeof it.w !== "number") it.w = DEFAULT_ITEM_W;
+    if (typeof it.h !== "number") it.h = DEFAULT_ITEM_H;
+    it.w = Math.max(1, it.w);
+    it.h = Math.max(1, it.h);
 
     if (typeof it.title !== "string" && it.title !== null) it.title = null;
     if (typeof it.content !== "string") it.content = "";
@@ -178,7 +177,7 @@ function buildOccupancy(board, state, cols) {
   return occ;
 }
 
-// Find a truly empty cell (not inside another resized tile)
+// Find a truly empty cell (not inside resized tile)
 function firstFreeCell(board, state, cols) {
   const occ = buildOccupancy(board, state, cols);
   for (let i = 0; i < board.slots.length; i++) {
@@ -198,7 +197,7 @@ function ensureGridSize(board, newSize) {
   if (target < board.slots.length) {
     for (const cell of occ.keys()) {
       if (cell >= target) {
-        alert("Cannot shrink: there are tiles in the slots that would be removed. Move/resize them first.");
+        alert("Cannot shrink: tiles exist in removed slots. Move/resize first.");
         return false;
       }
     }
@@ -231,7 +230,7 @@ function deleteBoardRecursive(state, boardId) {
   }
 }
 
-// Modal only for Rename Board
+// Rename board modal only
 function openModalRename({ initialContent, onSave }) {
   overlay.classList.remove("hidden");
   modalInputTitle.value = "";
@@ -239,7 +238,6 @@ function openModalRename({ initialContent, onSave }) {
 
   modalTitle.textContent = "Rename Board";
   modalContentLabel.textContent = "Name";
-  modalInputContent.placeholder = "Board name";
   modalHint.textContent = "";
 
   const close = () => {
@@ -279,7 +277,34 @@ modeMoveBtn.onclick = () => setMode(mode === "move" ? "none" : "move");
 modeSizeBtn.onclick = () => setMode(mode === "size" ? "none" : "size");
 modeTrashBtn.onclick = () => setMode(mode === "trash" ? "none" : "trash");
 
-// Create actions (always 1x1, title/content optional)
+// ✅ Auto-save helper (NO trim for note/link content => preserves all spaces/newlines)
+function commitInlineEdit(state) {
+  if (!inlineEdit) return false;
+  const it = state.items[inlineEdit.itemId];
+  if (!it) return false;
+
+  const titleRaw = inlineEdit.title ?? "";
+  const contentRaw = inlineEdit.content ?? "";
+
+  // title: treat whitespace-only as empty, but don't modify real content
+  it.title = titleRaw.trim() === "" ? null : titleRaw;
+
+  // content: preserve EXACT text (no trim!) for BOTH note and link
+  it.content = contentRaw;
+
+  return true;
+}
+
+// For opening links: normalize only for href (does NOT change stored content)
+function normalizeHref(raw) {
+  const s = (raw ?? "").trim();
+  if (!s) return "";
+  const firstLine = s.split("\n")[0].trim();
+  if (!firstLine) return "";
+  return /^https?:\/\//i.test(firstLine) ? firstLine : `https://${firstLine}`;
+}
+
+// Create actions (default 2x2)
 actionBoard.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
@@ -313,7 +338,11 @@ actionNote.onclick = () => {
   if (idx < 0) return alert("No empty space. Increase grid size (+).");
 
   const itemId = uid();
-  state.items[itemId] = { id: itemId, boardId, kind: "note", title: null, content: "", w: 1, h: 1 };
+  state.items[itemId] = {
+    id: itemId, boardId, kind: "note",
+    title: null, content: "",
+    w: DEFAULT_ITEM_W, h: DEFAULT_ITEM_H
+  };
   board.slots[idx] = { type: "item", id: itemId };
 
   saveState(state);
@@ -333,7 +362,11 @@ actionLink.onclick = () => {
   if (idx < 0) return alert("No empty space. Increase grid size (+).");
 
   const itemId = uid();
-  state.items[itemId] = { id: itemId, boardId, kind: "link", title: null, content: "", w: 1, h: 1 };
+  state.items[itemId] = {
+    id: itemId, boardId, kind: "link",
+    title: null, content: "",
+    w: DEFAULT_ITEM_W, h: DEFAULT_ITEM_H
+  };
   board.slots[idx] = { type: "item", id: itemId };
 
   saveState(state);
@@ -443,6 +476,7 @@ function render() {
     if (mode === "move" && movePick && movePick.slotIndex === i) card.classList.add("selected");
     if (mode === "size" && sizePick && sizePick.anchorIndex === i) card.classList.add("selected");
 
+    // BOARD CARD
     if (ref.type === "board") {
       const b = state.boards[ref.id];
       placeGrid(card, i, cols, 1, 1);
@@ -453,7 +487,7 @@ function render() {
           <div class="badge">▦</div>
         </div>
         <div class="cardTitle">${escapeHtml(b?.title || "(missing board)")}</div>
-        <div class="cardBody">${mode === "trash" ? "Click to delete" : (mode === "move" ? "Pick / move" : "Click to open")}</div>
+        <div class="itemBody">(tap to open)</div>
         <div class="cardHint"></div>
       `;
 
@@ -462,6 +496,7 @@ function render() {
       continue;
     }
 
+    // ITEM CARD
     if (ref.type === "item") {
       const it = state.items[ref.id];
       const kind = it?.kind || "note";
@@ -475,6 +510,7 @@ function render() {
       const editing = inlineEdit && inlineEdit.itemId === ref.id;
 
       if (editing) {
+        // EDIT MODE (no save/cancel buttons)
         const t = inlineEdit.title ?? "";
         const c = inlineEdit.content ?? "";
 
@@ -488,75 +524,50 @@ function render() {
 
           ${
             kind === "link"
-              ? `<input class="inlineUrl" placeholder="https://example.com (optional)" value="${escapeHtml(c)}">`
-              : `<textarea class="inlineBody" placeholder="Write here... (optional)">${escapeHtml(c)}</textarea>`
+              ? `<input class="inlineUrl" placeholder="Paste link here (optional)" value="${escapeHtml(c)}">`
+              : `<textarea class="inlineBody" placeholder="Write here (optional)">${escapeHtml(c)}</textarea>`
           }
 
-          <div class="cardHint">${sizeText}</div>
-
-          <div class="inlineActions">
-            <button class="tinyBtn">Cancel</button>
-            <button class="tinyBtn primary">Save</button>
-          </div>
+          <div class="cardHint">${sizeText} • tap card to save & exit</div>
         `;
 
         const titleEl = card.querySelector(".inlineTitle");
         const bodyEl  = card.querySelector(kind === "link" ? ".inlineUrl" : ".inlineBody");
-        const cancelEl= card.querySelector(".tinyBtn");
-        const saveEl  = card.querySelector(".tinyBtn.primary");
 
-        // focus the main input
-        setTimeout(() => bodyEl.focus(), 0);
-
+        // Update edit buffer
         titleEl.oninput = () => { inlineEdit.title = titleEl.value; };
         bodyEl.oninput  = () => { inlineEdit.content = bodyEl.value; };
 
-        cancelEl.onclick = (e) => {
+        // Prevent click inside inputs from closing edit mode
+        titleEl.onpointerdown = (e) => e.stopPropagation();
+        bodyEl.onpointerdown  = (e) => e.stopPropagation();
+
+        // Focus typing field
+        setTimeout(() => bodyEl.focus(), 0);
+
+        // ✅ Tap the card (outside input) => SAVE + EXIT
+        card.onclick = (e) => {
           e.stopPropagation();
+          if (commitInlineEdit(state)) saveState(state);
           inlineEdit = null;
           render();
         };
 
-        saveEl.onclick = (e) => {
-          e.stopPropagation();
-
-          // Title: trim is fine
-          const newTitle = (titleEl.value || "").trim();
-
-          // ✅ NOTE: preserve EXACT content (no trim) to keep blank lines/spaces
-          let newContent;
-          if (kind === "note") {
-            newContent = bodyEl.value ?? "";
-          } else {
-            // Link: trim for URL correctness (optional)
-            newContent = (bodyEl.value || "").trim();
-            if (newContent && !/^https?:\/\//i.test(newContent)) {
-              newContent = "https://" + newContent;
-            }
-          }
-
-          it.title = newTitle ? newTitle : null;
-          it.content = newContent;
-
-          inlineEdit = null;
-          saveState(state);
-          render();
-        };
-
-        card.onclick = (e) => e.stopPropagation();
       } else {
+        // VIEW MODE (scrollable + preserves whitespace)
         const titleText = it?.title ? it.title : "(no title)";
+        const raw = it?.content || "";
 
-        let bodyHtml = "";
+        let bodyNodeHtml = "";
         if (kind === "link") {
-          if (it?.content) {
-            bodyHtml = `<a target="_blank" href="${escapeHtml(it.content)}" onclick="event.stopPropagation()">${escapeHtml(it.content)}</a>`;
+          const href = normalizeHref(raw);
+          if (href) {
+            bodyNodeHtml = `<a target="_blank" href="${escapeHtml(href)}" onclick="event.stopPropagation()">${escapeHtml(raw || href)}</a>`;
           } else {
-            bodyHtml = `<div style="opacity:.6">(empty link)</div>`;
+            bodyNodeHtml = `<div style="opacity:.6">(empty link)</div>`;
           }
         } else {
-          // ✅ scrollable + preserves blank lines/spaces
-          bodyHtml = escapeHtml(it?.content || "");
+          bodyNodeHtml = escapeHtml(raw);
         }
 
         card.innerHTML = `
@@ -565,7 +576,7 @@ function render() {
             <div class="badge">${icon}</div>
           </div>
           <div class="cardTitle">${escapeHtml(titleText)}</div>
-          <div class="itemBody ${kind === "link" ? "link" : ""}">${bodyHtml}</div>
+          <div class="itemBody ${kind === "link" ? "link" : ""}">${bodyNodeHtml}</div>
           <div class="cardHint">${
             mode === "trash" ? "Click to delete" :
             mode === "move"  ? "Move: pick then click empty slot" :
@@ -653,6 +664,13 @@ function onClickEmptyCell(state, boardId, destIndex) {
 function onClickTile(state, boardId, slotIndex, ref) {
   const board = state.boards[boardId];
 
+  // If you're editing something and tap another tile => save previous first
+  if (inlineEdit && !(ref.type === "item" && inlineEdit.itemId === ref.id)) {
+    if (commitInlineEdit(state)) saveState(state);
+    inlineEdit = null;
+  }
+
+  // TRASH
   if (mode === "trash") {
     inlineEdit = null;
 
@@ -677,6 +695,7 @@ function onClickTile(state, boardId, slotIndex, ref) {
     }
   }
 
+  // MOVE (pick)
   if (mode === "move") {
     movePick = { slotIndex };
     sizePick = null;
@@ -685,21 +704,23 @@ function onClickTile(state, boardId, slotIndex, ref) {
     return;
   }
 
+  // SIZE (only note/link)
   if (mode === "size") {
     inlineEdit = null;
 
     if (ref.type === "item") {
       const it = state.items[ref.id];
       if (it && (it.kind === "note" || it.kind === "link")) {
+        // click again resets to default 2x2
         if (sizePick && sizePick.anchorIndex === slotIndex) {
-          it.w = 1;
-          it.h = 1;
+          it.w = DEFAULT_ITEM_W;
+          it.h = DEFAULT_ITEM_H;
           sizePick = null;
           saveState(state);
           render();
           return;
         }
-        sizePick = { anchorIndex: slotIndex, itemId: ref.id, destIndex: null };
+        sizePick = { anchorIndex: slotIndex, itemId: ref.id };
         render();
         return;
       }
@@ -725,9 +746,9 @@ function onClickTile(state, boardId, slotIndex, ref) {
     const it = state.items[ref.id];
     if (!it) return;
 
+    // Enter edit mode
     inlineEdit = {
       itemId: ref.id,
-      kind: it.kind,
       title: it.title || "",
       content: it.content || ""
     };
@@ -735,6 +756,16 @@ function onClickTile(state, boardId, slotIndex, ref) {
     return;
   }
 }
+
+// ✅ Tap outside cards to auto-save & exit edit mode
+document.addEventListener("pointerdown", (e) => {
+  if (!inlineEdit) return;
+  if (e.target.closest(".card")) return; // other cards handled by onClickTile
+  const state = loadState();
+  if (commitInlineEdit(state)) saveState(state);
+  inlineEdit = null;
+  render();
+});
 
 // Routing
 window.addEventListener("hashchange", () => {
