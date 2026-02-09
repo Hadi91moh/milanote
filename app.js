@@ -6,8 +6,9 @@
 //
 // Slots are fixed positions (index-based).
 // Rendering uses explicit grid placement so spans are possible.
+// Notes/Links are edited inline inside the card (no modal for note/link).
 
-const STORAGE_KEY = "boards_state_v4"; // keep same to preserve your existing data
+const STORAGE_KEY = "boards_state_v4";
 
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
@@ -46,6 +47,7 @@ const importInput = document.getElementById("importInput");
 let mode = "none";        // none | move | size | trash
 let movePick = null;      // { slotIndex } or null
 let sizePick = null;      // { anchorIndex, itemId, destIndex } or null
+let inlineEdit = null;    // { itemId, kind, title, content } or null
 
 function uid() {
   return (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
@@ -71,7 +73,6 @@ function migrateIfNeeded(state) {
     }
   }
 
-  // add default sizes for old items
   for (const it of Object.values(state.items)) {
     if (typeof it.w !== "number") it.w = 1;
     if (typeof it.h !== "number") it.h = 1;
@@ -143,10 +144,7 @@ function indexToRowCol(index, cols) {
 function rectCellsFromAnchor(anchorIndex, w, h, cols, maxSlots) {
   const { row: r0, col: c0 } = indexToRowCol(anchorIndex, cols);
   const cells = [];
-
-  // prevent wrap
   if (c0 + w - 1 > cols) return [];
-
   for (let dr = 0; dr < h; dr++) {
     for (let dc = 0; dc < w; dc++) {
       const r = r0 + dr;
@@ -170,16 +168,13 @@ function getSpanForRef(ref, state) {
 }
 
 function buildOccupancy(board, state, cols) {
-  // Map cellIndex -> anchorIndex
-  const occ = new Map();
+  const occ = new Map(); // cellIndex -> anchorIndex
   for (let i = 0; i < board.slots.length; i++) {
     const ref = board.slots[i];
     if (!ref) continue;
-
     const { w, h } = getSpanForRef(ref, state);
     const cells = rectCellsFromAnchor(i, w, h, cols, board.slots.length);
     for (const cell of cells) {
-      // first wins (avoid changing behavior if overlaps exist due to old state)
       if (!occ.has(cell)) occ.set(cell, i);
     }
   }
@@ -189,10 +184,10 @@ function buildOccupancy(board, state, cols) {
 function ensureGridSize(board, newSize) {
   const target = Math.max(GRID_MIN, Math.min(GRID_MAX, newSize));
   const cols = getCols();
+  const state = loadState();
+  const occ = buildOccupancy(board, state, cols);
 
   if (target < board.slots.length) {
-    // cannot shrink if any occupied cell would be cut off
-    const occ = buildOccupancy(board, loadState(), cols);
     for (const cell of occ.keys()) {
       if (cell >= target) {
         alert("Cannot shrink: there are tiles in the slots that would be removed. Move/resize them first.");
@@ -233,17 +228,7 @@ function openModal({ kind, modeLabel, initialTitle, initialContent, onSave }) {
   modalInputTitle.value = initialTitle || "";
   modalInputContent.value = initialContent || "";
 
-  if (kind === "note") {
-    modalTitle.textContent = modeLabel === "edit" ? "Edit Note" : "New Note";
-    modalContentLabel.textContent = "Note";
-    modalInputContent.placeholder = "Write your note…";
-    modalHint.textContent = "";
-  } else if (kind === "link") {
-    modalTitle.textContent = modeLabel === "edit" ? "Edit Link" : "New Link";
-    modalContentLabel.textContent = "URL";
-    modalInputContent.placeholder = "https://example.com";
-    modalHint.textContent = "If you omit https://, it will be added automatically.";
-  } else if (kind === "board") {
+  if (kind === "board") {
     modalTitle.textContent = "Rename Board";
     modalContentLabel.textContent = "Name";
     modalInputContent.placeholder = "Board name";
@@ -265,11 +250,6 @@ function openModal({ kind, modeLabel, initialTitle, initialContent, onSave }) {
     const title = modalInputTitle.value.trim();
     let content = modalInputContent.value.trim();
     if (!content) return;
-
-    if (kind === "link" && !/^https?:\/\//i.test(content)) {
-      content = "https://" + content;
-    }
-
     onSave({ title: title || null, content });
     close();
   };
@@ -284,6 +264,7 @@ function setMode(next) {
   mode = next;
   movePick = null;
   sizePick = null;
+  inlineEdit = null;
 
   modeMoveBtn.classList.toggle("on", mode === "move");
   modeSizeBtn.classList.toggle("on", mode === "size");
@@ -292,12 +273,11 @@ function setMode(next) {
   render();
 }
 
-// Mode toggles
 modeMoveBtn.onclick = () => setMode(mode === "move" ? "none" : "move");
 modeSizeBtn.onclick = () => setMode(mode === "size" ? "none" : "size");
 modeTrashBtn.onclick = () => setMode(mode === "trash" ? "none" : "trash");
 
-// Actions (create in next free slot)
+// Actions
 actionBoard.onclick = () => {
   const state = loadState();
   const boardId = getCurrentBoardId(state);
@@ -328,19 +308,14 @@ actionNote.onclick = () => {
   const idx = firstEmptySlot(board);
   if (idx < 0) return alert("No empty slots. Increase grid size (+).");
 
-  openModal({
-    kind: "note",
-    modeLabel: "new",
-    initialTitle: "",
-    initialContent: "",
-    onSave: ({ title, content }) => {
-      const itemId = uid();
-      state.items[itemId] = { id: itemId, boardId, kind: "note", title, content, w: 1, h: 1 };
-      board.slots[idx] = { type: "item", id: itemId };
-      saveState(state);
-      render();
-    }
-  });
+  const itemId = uid();
+  state.items[itemId] = { id: itemId, boardId, kind: "note", title: null, content: "", w: 1, h: 1 };
+  board.slots[idx] = { type: "item", id: itemId };
+
+  inlineEdit = { itemId, kind: "note", title: "", content: "" };
+
+  saveState(state);
+  render();
 };
 
 actionLink.onclick = () => {
@@ -354,19 +329,14 @@ actionLink.onclick = () => {
   const idx = firstEmptySlot(board);
   if (idx < 0) return alert("No empty slots. Increase grid size (+).");
 
-  openModal({
-    kind: "link",
-    modeLabel: "new",
-    initialTitle: "",
-    initialContent: "",
-    onSave: ({ title, content }) => {
-      const itemId = uid();
-      state.items[itemId] = { id: itemId, boardId, kind: "link", title, content, w: 1, h: 1 };
-      board.slots[idx] = { type: "item", id: itemId };
-      saveState(state);
-      render();
-    }
-  });
+  const itemId = uid();
+  state.items[itemId] = { id: itemId, boardId, kind: "link", title: null, content: "", w: 1, h: 1 };
+  board.slots[idx] = { type: "item", id: itemId };
+
+  inlineEdit = { itemId, kind: "link", title: "", content: "" };
+
+  saveState(state);
+  render();
 };
 
 // Rename current board
@@ -446,28 +416,24 @@ function render() {
 
   elGrid.innerHTML = "";
 
-  // 1) render slot overlays for ALL indices (for fixed positions)
+  // Slot overlays for targets (move/size)
   for (let i = 0; i < board.slots.length; i++) {
     const slot = document.createElement("div");
     slot.className = "slot";
     placeGrid(slot, i, cols, 1, 1);
 
     const isOccupiedCell = occ.has(i);
-
     const showTargets = (mode === "move" || mode === "size") && !isOccupiedCell;
-    if (showTargets) slot.classList.add("target");
-
-    if (mode === "move" && movePick && movePick.slotIndex === i) slot.classList.add("selected");
-    if (mode === "size" && sizePick && sizePick.destIndex === i) slot.classList.add("selected");
 
     if (showTargets) {
+      slot.classList.add("target");
       slot.onclick = () => onClickEmptyCell(state, boardId, i);
     }
 
     elGrid.appendChild(slot);
   }
 
-  // 2) render cards for anchors (slots[] entries)
+  // Cards for anchors
   for (let i = 0; i < board.slots.length; i++) {
     const ref = board.slots[i];
     if (!ref) continue;
@@ -505,31 +471,97 @@ function render() {
 
       const spanW = Math.max(1, it?.w || 1);
       const spanH = Math.max(1, it?.h || 1);
-
       placeGrid(card, i, cols, spanW, spanH);
 
-      const body = kind === "link"
-        ? `<a target="_blank" href="${escapeHtml(it?.content || "")}" onclick="event.stopPropagation()">${escapeHtml(it?.content || "")}</a>`
-        : `<div style="white-space:pre-wrap">${escapeHtml(it?.content || "")}</div>`;
-
       const sizeText = `Size: ${spanW}×${spanH}`;
+      const editing = inlineEdit && inlineEdit.itemId === ref.id;
 
-      card.innerHTML = `
-        <div class="cardHeader">
-          <div class="badge">${escapeHtml(kind.toUpperCase())}</div>
-          <div class="badge">${icon}</div>
-        </div>
-        <div class="cardTitle">${escapeHtml(it?.title || "(no title)")}</div>
-        <div class="cardBody">${body}</div>
-        <div class="cardHint">${
-          mode === "trash" ? "Click to delete" :
-          mode === "move"  ? "Move mode: pick then click an empty slot" :
-          mode === "size"  ? `Size mode: click empty slot to expand • ${sizeText}` :
-          sizeText
-        }</div>
-      `;
+      if (editing) {
+        const t = inlineEdit.title ?? "";
+        const c = inlineEdit.content ?? "";
 
-      card.onclick = () => onClickTile(state, boardId, i, ref);
+        card.innerHTML = `
+          <div class="cardHeader">
+            <div class="badge">${escapeHtml(kind.toUpperCase())}</div>
+            <div class="badge">${icon}</div>
+          </div>
+
+          <input class="inlineTitle" placeholder="Title (optional)" value="${escapeHtml(t)}">
+
+          ${
+            kind === "link"
+              ? `<input class="inlineUrl" placeholder="https://example.com" value="${escapeHtml(c)}">`
+              : `<textarea class="inlineBody" placeholder="Write here...">${escapeHtml(c)}</textarea>`
+          }
+
+          <div class="cardHint">${sizeText}</div>
+
+          <div class="inlineActions">
+            <button class="tinyBtn">Cancel</button>
+            <button class="tinyBtn primary">Save</button>
+          </div>
+        `;
+
+        const titleEl = card.querySelector(".inlineTitle");
+        const bodyEl  = card.querySelector(kind === "link" ? ".inlineUrl" : ".inlineBody");
+        const cancelEl= card.querySelector(".tinyBtn");
+        const saveEl  = card.querySelector(".tinyBtn.primary");
+
+        // Auto focus for Android (nice UX)
+        setTimeout(() => bodyEl.focus(), 0);
+
+        titleEl.oninput = () => { inlineEdit.title = titleEl.value; };
+        bodyEl.oninput  = () => { inlineEdit.content = bodyEl.value; };
+
+        cancelEl.onclick = (e) => {
+          e.stopPropagation();
+          inlineEdit = null;
+          render();
+        };
+
+        saveEl.onclick = (e) => {
+          e.stopPropagation();
+
+          const newTitle = (inlineEdit.title || "").trim();
+          let newContent = (inlineEdit.content || "").trim();
+
+          if (kind === "link" && newContent && !/^https?:\/\//i.test(newContent)) {
+            newContent = "https://" + newContent;
+          }
+
+          it.title = newTitle ? newTitle : null;
+          it.content = newContent;
+
+          inlineEdit = null;
+          saveState(state);
+          render();
+        };
+
+        // prevent card click from toggling
+        card.onclick = (e) => e.stopPropagation();
+      } else {
+        const body = kind === "link"
+          ? `<a target="_blank" href="${escapeHtml(it?.content || "")}" onclick="event.stopPropagation()">${escapeHtml(it?.content || "")}</a>`
+          : `<div style="white-space:pre-wrap">${escapeHtml(it?.content || "")}</div>`;
+
+        card.innerHTML = `
+          <div class="cardHeader">
+            <div class="badge">${escapeHtml(kind.toUpperCase())}</div>
+            <div class="badge">${icon}</div>
+          </div>
+          <div class="cardTitle">${escapeHtml(it?.title || "(no title)")}</div>
+          <div class="cardBody">${body}</div>
+          <div class="cardHint">${
+            mode === "trash" ? "Click to delete" :
+            mode === "move"  ? "Move mode: pick then click an empty slot" :
+            mode === "size"  ? `Size mode: click empty slot to expand • ${sizeText}` :
+            sizeText
+          }</div>
+        `;
+
+        card.onclick = () => onClickTile(state, boardId, i, ref);
+      }
+
       elGrid.appendChild(card);
       continue;
     }
@@ -542,15 +574,13 @@ function onClickEmptyCell(state, boardId, destIndex) {
   const occ = buildOccupancy(board, state, cols);
 
   if (mode === "move") {
-    if (!movePick) return; // must pick a tile first
+    if (!movePick) return;
+
     const src = movePick.slotIndex;
     const ref = board.slots[src];
     if (!ref) { movePick = null; return render(); }
-
-    // Only allow move to empty cell (no swap) for safety with spans
     if (occ.has(destIndex)) return;
 
-    // Validate footprint fits and doesn't collide
     const { w, h } = getSpanForRef(ref, state);
     const cells = rectCellsFromAnchor(destIndex, w, h, cols, board.slots.length);
     if (cells.length === 0) return;
@@ -564,13 +594,14 @@ function onClickEmptyCell(state, boardId, destIndex) {
     board.slots[src] = null;
 
     movePick = null;
+    inlineEdit = null;
     saveState(state);
     render();
     return;
   }
 
   if (mode === "size") {
-    if (!sizePick) return; // must select a note/link first
+    if (!sizePick) return;
 
     const anchorIndex = sizePick.anchorIndex;
     const ref = board.slots[anchorIndex];
@@ -579,7 +610,6 @@ function onClickEmptyCell(state, boardId, destIndex) {
     const it = state.items[ref.id];
     if (!it || (it.kind !== "note" && it.kind !== "link")) return;
 
-    // Destination must be down/right from anchor
     const a = indexToRowCol(anchorIndex, cols);
     const d = indexToRowCol(destIndex, cols);
     if (d.row < a.row || d.col < a.col) return;
@@ -590,7 +620,6 @@ function onClickEmptyCell(state, boardId, destIndex) {
     const cells = rectCellsFromAnchor(anchorIndex, newW, newH, cols, board.slots.length);
     if (cells.length === 0) return;
 
-    // Ensure no collision with other tiles
     for (const cell of cells) {
       const anchorAtCell = occ.get(cell);
       if (anchorAtCell !== undefined && anchorAtCell !== anchorIndex) return;
@@ -598,7 +627,6 @@ function onClickEmptyCell(state, boardId, destIndex) {
 
     it.w = newW;
     it.h = newH;
-    sizePick.destIndex = destIndex;
 
     saveState(state);
     render();
@@ -611,7 +639,7 @@ function onClickTile(state, boardId, slotIndex, ref) {
 
   // TRASH
   if (mode === "trash") {
-    if (!ref) return;
+    inlineEdit = null;
 
     if (ref.type === "item") {
       const it = state.items[ref.id];
@@ -634,22 +662,24 @@ function onClickTile(state, boardId, slotIndex, ref) {
     }
   }
 
-  // MOVE
+  // MOVE (pick)
   if (mode === "move") {
-    // select tile (pick)
+    if (!ref) return;
     movePick = { slotIndex };
+    sizePick = null;
+    inlineEdit = null;
     render();
     return;
   }
 
-  // SIZE (only for note/link)
+  // SIZE (only note/link)
   if (mode === "size") {
+    inlineEdit = null;
+
     if (ref.type === "item") {
       const it = state.items[ref.id];
-      if (!it) return;
-
-      if (it.kind === "note" || it.kind === "link") {
-        // if already selected -> reset to 1x1
+      if (it && (it.kind === "note" || it.kind === "link")) {
+        // click again resets size
         if (sizePick && sizePick.anchorIndex === slotIndex) {
           it.w = 1;
           it.h = 1;
@@ -658,14 +688,12 @@ function onClickTile(state, boardId, slotIndex, ref) {
           render();
           return;
         }
-
         sizePick = { anchorIndex: slotIndex, itemId: ref.id, destIndex: null };
         render();
         return;
       }
     }
 
-    // clicking a board just opens it
     if (ref.type === "board") {
       sizePick = null;
       setCurrentBoard(ref.id);
@@ -677,6 +705,7 @@ function onClickTile(state, boardId, slotIndex, ref) {
 
   // NORMAL
   if (ref.type === "board") {
+    inlineEdit = null;
     setCurrentBoard(ref.id);
     return;
   }
@@ -685,21 +714,25 @@ function onClickTile(state, boardId, slotIndex, ref) {
     const it = state.items[ref.id];
     if (!it) return;
 
-    openModal({
+    inlineEdit = {
+      itemId: ref.id,
       kind: it.kind,
-      modeLabel: "edit",
-      initialTitle: it.title || "",
-      initialContent: it.content || "",
-      onSave: ({ title, content }) => {
-        it.title = title;
-        it.content = content;
-        saveState(state);
-        render();
-      }
-    });
+      title: it.title || "",
+      content: it.content || ""
+    };
+
+    render();
     return;
   }
 }
+
+// Routing
+window.addEventListener("hashchange", () => {
+  movePick = null;
+  sizePick = null;
+  inlineEdit = null;
+  render();
+});
 
 // Export / Import
 exportBtn.onclick = () => {
@@ -730,13 +763,6 @@ importInput.addEventListener("change", async (e) => {
   } finally {
     e.target.value = "";
   }
-});
-
-// Routing
-window.addEventListener("hashchange", () => {
-  movePick = null;
-  sizePick = null;
-  render();
 });
 
 render();
