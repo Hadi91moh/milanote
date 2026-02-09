@@ -1,4 +1,4 @@
-const STORAGE_KEY = "boards_state_v8";
+const STORAGE_KEY = "boards_state_v9";
 
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
@@ -37,7 +37,7 @@ const modeTrashBtn = document.getElementById("modeTrash");
 const btnGridPlus = document.getElementById("btnGridPlus");
 const btnGridMinus = document.getElementById("btnGridMinus");
 
-// remove/ignore rename button (we also hide it via CSS)
+// hide/remove rename button if present
 const btnRename = document.getElementById("btnRename");
 if (btnRename) btnRename.style.display = "none";
 
@@ -49,9 +49,9 @@ let movePick = null;      // { slotIndex } or null
 let sizePick = null;      // { anchorIndex, itemId } or null
 
 // inline editor state
-// type: "item" or "boardTile"
-// for item: { type:"item", itemId, draft }
-// for boardTile: { type:"boardTile", boardId, draftTitle }
+// type: "item" or "boardTitle"
+// item: { type:"item", itemId, draft }
+// boardTitle: { type:"boardTitle", boardId, draftTitle }
 let inlineEdit = null;
 
 function uid() {
@@ -379,11 +379,11 @@ function commitInlineEdit(state) {
     return true;
   }
 
-  if (inlineEdit.type === "boardTile") {
+  if (inlineEdit.type === "boardTitle") {
     const b = state.boards[inlineEdit.boardId];
     if (!b) return false;
     const t = (inlineEdit.draftTitle ?? "").trim();
-    if (!t) return false; // don't allow empty board name
+    if (!t) return false;
     b.title = t;
     return true;
   }
@@ -494,12 +494,12 @@ function render() {
     if (mode === "move" && movePick && movePick.slotIndex === i) card.classList.add("selected");
     if (mode === "size" && sizePick && sizePick.anchorIndex === i) card.classList.add("selected");
 
-    // BOARD TILE
+    // BOARD TILE (two parts: title bar rename + body open)
     if (ref.type === "board") {
       const b = state.boards[ref.id];
       placeGrid(card, i, cols, 1, 1);
 
-      const editing = inlineEdit && inlineEdit.type === "boardTile" && inlineEdit.boardId === ref.id;
+      const editing = inlineEdit && inlineEdit.type === "boardTitle" && inlineEdit.boardId === ref.id;
 
       if (editing) {
         card.innerHTML = `
@@ -537,26 +537,45 @@ function render() {
 
         card.onclick = (e) => e.stopPropagation();
       } else {
+        // Create two clickable areas inside the card
         card.innerHTML = `
-          <div class="cardHeader">
+          <div class="cardHeader" style="padding-bottom:6px;">
             <div class="badge">BOARD</div>
             <div class="badge">▦</div>
           </div>
-          <div class="cardTitle">${escapeHtml(b?.title || "Board")}</div>
-          <div class="cardHint">${
-            mode === "trash" ? "Click to delete" :
-            "Tap to rename • Long-press (open) not needed"
-          }</div>
+
+          <!-- TOP: title bar (rename) -->
+          <div class="cardTitle boardTitleBar" style="padding:6px 2px; border-top:1px solid var(--border);">
+            ${escapeHtml(b?.title || "Board")}
+          </div>
+
+          <!-- BOTTOM: body (open) -->
+          <div class="boardOpenArea" style="flex:1 1 auto; min-height:0; border-top:1px solid var(--border); border-radius:14px; background:#ffffff; opacity:.35;">
+          </div>
+
+          <div class="cardHint" style="padding-top:6px;">Tap title to rename • Tap body to open</div>
         `;
 
-        // Tap board tile => rename (like note/link)
-        card.onclick = () => onClickTile(state, boardId, i, ref);
+        const titleBar = card.querySelector(".boardTitleBar");
+        const openArea = card.querySelector(".boardOpenArea");
 
-        // Double click (desktop) to open board quickly
-        card.ondblclick = (e) => {
+        titleBar.onclick = (e) => {
           e.stopPropagation();
-          if (mode !== "trash") setCurrentBoard(ref.id);
+          if (mode === "trash") return onClickTile(state, boardId, i, ref); // delete
+          if (mode !== "none") return; // don't rename in move/size modes
+          inlineEdit = { type: "boardTitle", boardId: ref.id, draftTitle: b?.title || "" };
+          render();
         };
+
+        openArea.onclick = (e) => {
+          e.stopPropagation();
+          if (mode === "trash") return onClickTile(state, boardId, i, ref); // delete
+          if (mode !== "none") return; // move/size modes
+          setCurrentBoard(ref.id);
+        };
+
+        // clicking elsewhere does nothing
+        card.onclick = (e) => e.stopPropagation();
       }
 
       elGrid.appendChild(card);
@@ -707,10 +726,9 @@ function onClickTile(state, boardId, slotIndex, ref) {
 
   // If editing something else, save it first (best effort)
   if (inlineEdit) {
-    // If you click the same editing tile, do nothing
-    const sameBoardTile = (inlineEdit.type === "boardTile" && ref.type === "board" && inlineEdit.boardId === ref.id);
+    const sameBoardTitle = (inlineEdit.type === "boardTitle" && ref.type === "board" && inlineEdit.boardId === ref.id);
     const sameItem = (inlineEdit.type === "item" && ref.type === "item" && inlineEdit.itemId === ref.id);
-    if (!sameBoardTile && !sameItem) {
+    if (!sameBoardTitle && !sameItem) {
       commitInlineEdit(state);
       saveState(state);
       inlineEdit = null;
@@ -777,30 +795,19 @@ function onClickTile(state, boardId, slotIndex, ref) {
       return;
     }
 
-    if (ref.type === "board") {
-      // size mode doesn't apply to board tiles
-      return;
-    }
-
     return;
   }
 
-  // NORMAL MODE:
-  if (ref.type === "board") {
-    // ✅ Tap board tile => rename it inline (NOT open)
-    inlineEdit = { type: "boardTile", boardId: ref.id, draftTitle: state.boards[ref.id]?.title || "" };
-    render();
-    return;
-  }
-
+  // NORMAL MODE
   if (ref.type === "item") {
     const it = state.items[ref.id];
     if (!it) return;
-
     inlineEdit = { type: "item", itemId: ref.id, draft: it.content || "" };
     render();
     return;
   }
+
+  // boards are handled by title/body click areas inside render()
 }
 
 /* ---------- Top bar + routing ---------- */
