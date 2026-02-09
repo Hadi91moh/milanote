@@ -161,17 +161,6 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 .cardHeader{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .badge{font-size:12px;color:var(--muted)}
 .cardTitle{font-weight:700; font-size:14px; line-height:1.2}
-
-/* used for small helper text */
-.cardBody{
-  font-size:12px;
-  color:var(--muted);
-  overflow:hidden;
-  display:-webkit-box;
-  -webkit-line-clamp:5;
-  -webkit-box-orient:vertical;
-}
-
 .cardHint{
   font-size:12px;
   color:var(--muted);
@@ -181,7 +170,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 .card.trashPulse{outline:2px solid #ff000035}
 .card.selected{outline:3px solid #11111125}
 
-/* ✅ Non-edit view: scrollable content area (preserves blank lines) */
+/* ✅ Non-edit view: scrollable and preserves ALL spaces/newlines */
 .itemBody{
   flex:1 1 auto;
   min-height:0;
@@ -191,12 +180,21 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   font-size:12px;
   padding-right:4px;
 }
+
+/* Link view */
 .itemBody.link{
-  white-space:normal;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.itemBody.link a{
+  color:#0a58ca;
+  text-decoration:none;
+  white-space:pre-wrap;
   word-break:break-all;
 }
+.itemBody.link a:hover{ text-decoration:underline; }
 
-/* ✅ Inline editor inside cards (notes/links) */
+/* ✅ Inline editor */
 .inlineTitle, .inlineUrl{
   width:100%;
   border:1px solid var(--border);
@@ -206,8 +204,8 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   flex:0 0 auto;
 }
 
-/* ✅ KEY FIX: textarea flexes to remaining height and becomes scrollable.
-   No min-height => buttons never get pushed out of the card. */
+/* ✅ KEY: textarea uses remaining height and scrolls inside.
+   No buttons anymore, so nothing can be hidden. */
 .inlineBody{
   width:100%;
   border:1px solid var(--border);
@@ -220,28 +218,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   overflow:auto;
 
   resize:none;
-}
-
-.inlineActions{
-  display:flex;
-  justify-content:flex-end;
-  gap:10px;
-  flex:0 0 auto;
-}
-
-.tinyBtn{
-  border:1px solid var(--border);
-  background:#fff;
-  border-radius:12px;
-  padding:8px 10px;
-  cursor:pointer;
-  font-size:12px;
-}
-
-.tinyBtn.primary{
-  border-color:#111;
-  background:#111;
-  color:#fff;
+  white-space:pre-wrap;
 }
 
 /* Modal (Rename board only) */
