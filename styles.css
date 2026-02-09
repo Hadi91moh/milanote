@@ -162,7 +162,48 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
 .card.trashPulse{outline:2px solid #ff000035}
 .card.selected{outline:3px solid #11111125}
 
-/* Modal */
+/* Inline editor inside cards (notes/links) */
+.inlineTitle, .inlineUrl{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px 10px;
+  font-size:14px;
+}
+
+.inlineBody{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px 10px;
+  font-size:14px;
+  resize:vertical;
+  min-height: 120px;
+}
+
+.inlineActions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  margin-top:auto;
+}
+
+.tinyBtn{
+  border:1px solid var(--border);
+  background:#fff;
+  border-radius:12px;
+  padding:8px 10px;
+  cursor:pointer;
+  font-size:12px;
+}
+
+.tinyBtn.primary{
+  border-color:#111;
+  background:#111;
+  color:#fff;
+}
+
+/* Modal (still used for Rename board) */
 .modalOverlay{
   position:fixed; inset:0;
   background:rgba(0,0,0,.35);
@@ -170,6 +211,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   align-items:center;
   justify-content:center;
   padding:16px;
+  z-index: 9999;
 }
 .modalOverlay.hidden{display:none}
 .modal{
