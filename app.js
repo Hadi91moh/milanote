@@ -1,4 +1,4 @@
-const STORAGE_KEY = "boards_state_v9";
+const STORAGE_KEY = "boards_state_v10";
 
 const DEFAULT_SLOTS = 80;
 const GRID_STEP = 20;
@@ -18,8 +18,8 @@ const elGridInfo = document.getElementById("gridInfo");
 
 const overlay = document.getElementById("modalOverlay");
 const modalTitle = document.getElementById("modalTitle");
-const modalInputTitle = document.getElementById("modalInputTitle");     // unused
-const modalInputContent = document.getElementById("modalInputContent"); // used for board name on create
+const modalInputTitle = document.getElementById("modalInputTitle");
+const modalInputContent = document.getElementById("modalInputContent");
 const modalContentLabel = document.getElementById("modalContentLabel");
 const modalHint = document.getElementById("modalHint");
 const modalSave = document.getElementById("modalSave");
@@ -49,7 +49,6 @@ let movePick = null;      // { slotIndex } or null
 let sizePick = null;      // { anchorIndex, itemId } or null
 
 // inline editor state
-// type: "item" or "boardTitle"
 // item: { type:"item", itemId, draft }
 // boardTitle: { type:"boardTitle", boardId, draftTitle }
 let inlineEdit = null;
@@ -244,31 +243,35 @@ function deleteBoardRecursive(state, boardId) {
   }
 }
 
-/* ---------- Modal for Create Board ---------- */
-function openBoardNameModal({ title, initialName, onOk }) {
+/* ---------- Modal for Create Board (ONLY Title input) ---------- */
+function openCreateBoardTitleModal({ initialTitle, onOk }) {
   overlay.classList.remove("hidden");
 
-  modalTitle.textContent = title;
-  modalContentLabel.textContent = "Board name";
+  modalTitle.textContent = "Create Board";
   modalHint.textContent = "";
+  modalContentLabel.style.display = "none";
+  modalInputContent.style.display = "none";
 
-  modalInputTitle.value = "";
-  modalInputTitle.style.display = "none";
-  modalInputContent.value = initialName || "";
-  modalInputContent.placeholder = "Example: Projects";
+  modalInputTitle.style.display = "";
+  modalInputTitle.value = initialTitle || "New Board";
+  modalInputTitle.placeholder = "Board title";
 
   const close = () => {
     overlay.classList.add("hidden");
     modalSave.onclick = null;
     document.onkeydown = null;
     overlay.onclick = null;
+
+    // restore defaults (in case other modals exist later)
+    modalContentLabel.style.display = "";
+    modalInputContent.style.display = "";
     modalInputTitle.style.display = "";
   };
 
   modalSave.onclick = () => {
-    const name = modalInputContent.value.trim();
-    if (!name) return;
-    onOk(name);
+    const title = modalInputTitle.value.trim();
+    if (!title) return;
+    onOk(title);
     close();
   };
 
@@ -277,7 +280,7 @@ function openBoardNameModal({ title, initialName, onOk }) {
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
   document.onkeydown = (e) => { if (e.key === "Escape") close(); };
 
-  setTimeout(() => modalInputContent.focus(), 0);
+  setTimeout(() => modalInputTitle.focus(), 0);
 }
 
 /* ---------- Mode ---------- */
@@ -312,11 +315,10 @@ actionBoard.onclick = () => {
   const idx = firstFreeCell(board, state, cols);
   if (idx < 0) return alert("No empty space. Increase grid size (+).");
 
-  openBoardNameModal({
-    title: "Create Board",
-    initialName: "New Board",
-    onOk: (name) => {
-      const newBoard = initBoard(name, boardId);
+  openCreateBoardTitleModal({
+    initialTitle: "New Board",
+    onOk: (title) => {
+      const newBoard = initBoard(title, boardId);
       state.boards[newBoard.id] = newBoard;
       board.slots[idx] = { type: "board", id: newBoard.id };
       saveState(state);
@@ -494,7 +496,9 @@ function render() {
     if (mode === "move" && movePick && movePick.slotIndex === i) card.classList.add("selected");
     if (mode === "size" && sizePick && sizePick.anchorIndex === i) card.classList.add("selected");
 
-    // BOARD TILE (two parts: title bar rename + body open)
+    // BOARD TILE:
+    // - green title area renames
+    // - ANY other area opens (blue+red both open)
     if (ref.type === "board") {
       const b = state.boards[ref.id];
       placeGrid(card, i, cols, 1, 1);
@@ -508,7 +512,7 @@ function render() {
             <div class="badge">▦</div>
           </div>
 
-          <textarea class="inlineBody" placeholder="Board name">${escapeHtml(inlineEdit.draftTitle ?? "")}</textarea>
+          <textarea class="inlineBody" placeholder="Board title">${escapeHtml(inlineEdit.draftTitle ?? "")}</textarea>
 
           <div class="inlineActions">
             <button class="tinyBtn">Cancel</button>
@@ -537,45 +541,38 @@ function render() {
 
         card.onclick = (e) => e.stopPropagation();
       } else {
-        // Create two clickable areas inside the card
         card.innerHTML = `
           <div class="cardHeader" style="padding-bottom:6px;">
             <div class="badge">BOARD</div>
             <div class="badge">▦</div>
           </div>
 
-          <!-- TOP: title bar (rename) -->
-          <div class="cardTitle boardTitleBar" style="padding:6px 2px; border-top:1px solid var(--border);">
+          <div class="cardTitle boardTitleBar" style="padding:6px 2px; border-top:1px solid var(--border); border-radius:12px;">
             ${escapeHtml(b?.title || "Board")}
           </div>
 
-          <!-- BOTTOM: body (open) -->
-          <div class="boardOpenArea" style="flex:1 1 auto; min-height:0; border-top:1px solid var(--border); border-radius:14px; background:#ffffff; opacity:.35;">
+          <div class="boardOpenArea" style="margin-top:8px; height:48px; border-top:1px solid var(--border); border-radius:14px; background:#ffffff; opacity:.25;">
           </div>
 
-          <div class="cardHint" style="padding-top:6px;">Tap title to rename • Tap body to open</div>
+          <div class="cardHint" style="padding-top:6px;">Tap title to rename • Tap anywhere else to open</div>
         `;
 
         const titleBar = card.querySelector(".boardTitleBar");
-        const openArea = card.querySelector(".boardOpenArea");
 
+        // green title => rename
         titleBar.onclick = (e) => {
           e.stopPropagation();
-          if (mode === "trash") return onClickTile(state, boardId, i, ref); // delete
-          if (mode !== "none") return; // don't rename in move/size modes
+          if (mode !== "none") return;
           inlineEdit = { type: "boardTitle", boardId: ref.id, draftTitle: b?.title || "" };
           render();
         };
 
-        openArea.onclick = (e) => {
-          e.stopPropagation();
-          if (mode === "trash") return onClickTile(state, boardId, i, ref); // delete
-          if (mode !== "none") return; // move/size modes
+        // ✅ whole card (except title) opens
+        card.onclick = () => {
+          if (mode === "trash") return onClickTile(state, boardId, i, ref);
+          if (mode !== "none") return;
           setCurrentBoard(ref.id);
         };
-
-        // clicking elsewhere does nothing
-        card.onclick = (e) => e.stopPropagation();
       }
 
       elGrid.appendChild(card);
@@ -806,8 +803,6 @@ function onClickTile(state, boardId, slotIndex, ref) {
     render();
     return;
   }
-
-  // boards are handled by title/body click areas inside render()
 }
 
 /* ---------- Top bar + routing ---------- */
