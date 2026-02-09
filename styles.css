@@ -97,7 +97,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   cursor:pointer;
 }
 
-/* Canvas: no dots */
+/* Canvas */
 .canvas{
   flex:1;
   overflow:auto;
@@ -105,7 +105,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   background:var(--bg);
 }
 
-/* Important for resizing: fixed cell size + spans */
+/* Fixed cell size + spans */
 .grid{
   display:grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--slot), var(--slot)));
@@ -146,46 +146,87 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   box-shadow: 0 2px 10px rgba(0,0,0,.04);
   padding:12px;
   cursor:pointer;
+
   display:flex;
   flex-direction:column;
   gap:8px;
+
   position: relative;
   z-index: 2;
-  overflow: hidden;
+
+  overflow:hidden;
+  min-height:0;
 }
+
 .cardHeader{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .badge{font-size:12px;color:var(--muted)}
 .cardTitle{font-weight:700; font-size:14px; line-height:1.2}
-.cardBody{font-size:12px;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical}
-.cardHint{font-size:12px;color:var(--muted);margin-top:auto}
+
+/* used for small helper text */
+.cardBody{
+  font-size:12px;
+  color:var(--muted);
+  overflow:hidden;
+  display:-webkit-box;
+  -webkit-line-clamp:5;
+  -webkit-box-orient:vertical;
+}
+
+.cardHint{
+  font-size:12px;
+  color:var(--muted);
+  flex:0 0 auto;
+}
 
 .card.trashPulse{outline:2px solid #ff000035}
 .card.selected{outline:3px solid #11111125}
 
-/* Inline editor inside cards (notes/links) */
+/* ✅ Non-edit view: scrollable content area (preserves blank lines) */
+.itemBody{
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+  white-space:pre-wrap;
+  color:var(--muted);
+  font-size:12px;
+  padding-right:4px;
+}
+.itemBody.link{
+  white-space:normal;
+  word-break:break-all;
+}
+
+/* ✅ Inline editor inside cards (notes/links) */
 .inlineTitle, .inlineUrl{
   width:100%;
   border:1px solid var(--border);
   border-radius:12px;
   padding:10px 10px;
   font-size:14px;
+  flex:0 0 auto;
 }
 
+/* ✅ KEY FIX: textarea flexes to remaining height and becomes scrollable.
+   No min-height => buttons never get pushed out of the card. */
 .inlineBody{
   width:100%;
   border:1px solid var(--border);
   border-radius:12px;
   padding:10px 10px;
   font-size:14px;
-  resize:vertical;
-  min-height: 120px;
+
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+
+  resize:none;
 }
 
 .inlineActions{
   display:flex;
   justify-content:flex-end;
   gap:10px;
-  margin-top:auto;
+  flex:0 0 auto;
 }
 
 .tinyBtn{
@@ -203,7 +244,7 @@ body{margin:0;font-family:system-ui, Arial;background:var(--bg);color:var(--text
   color:#fff;
 }
 
-/* Modal (still used for Rename board) */
+/* Modal (Rename board only) */
 .modalOverlay{
   position:fixed; inset:0;
   background:rgba(0,0,0,.35);
