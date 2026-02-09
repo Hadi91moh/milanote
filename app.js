@@ -554,7 +554,7 @@ function render() {
           <div class="boardOpenArea" style="margin-top:8px; height:48px; border-top:1px solid var(--border); border-radius:14px; background:#ffffff; opacity:.25;">
           </div>
 
-          <div class="cardHint" style="padding-top:6px;">Tap title to rename • Tap anywhere else to open</div>
+          <div class="cardHint" style="padding-top:6px;">• Tap to open</div>
         `;
 
         const titleBar = card.querySelector(".boardTitleBar");
